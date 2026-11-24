@@ -3925,7 +3925,7 @@ const OD_CFG={
 };
 const OD_CLIENT=()=>{const c=OD_CFG.clientId;if(c&&!c.startsWith('__'))return c;try{return localStorage.getItem('pa_client')||''}catch(e){return ''}};
 const OD_REDIRECT=()=>location.origin+location.pathname.replace(/index\.html$/,'');
-const OD={tok:null,etag:{},dirty:{},dead:{},all:{},busy:false,timer:null,last:null,err:'',user:'',ready:false,online:navigator.onLine};
+const OD={tok:null,etag:{},busy:false,timer:null,last:null,err:'',user:'',ready:false,online:navigator.onLine};
 
 /* ---------- piccolo archivio locale (IndexedDB) per avvio veloce e uso offline ---------- */
 const IDB=(()=>{let p;const db=()=>p||(p=new Promise((res,rej)=>{const r=indexedDB.open('portafoglio_agente',1);r.onupgradeneeded=()=>{r.result.createObjectStore('kv');r.result.createObjectStore('blob')};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)}));
@@ -3983,28 +3983,31 @@ async function gfetch(url,opt={},retry=true){
   if(r.status===429||r.status===503){const w=(+r.headers.get('Retry-After')||3)*1000;await new Promise(z=>setTimeout(z,w));return gfetch(url,opt,retry)}
   return r;
 }
-async function odMeta(rel){const r=await gfetch(odPath(rel)+'?$select=id,eTag,size,file,@microsoft.graph.downloadUrl');if(r.status===404)return null;if(!r.ok)throw await odErr('lettura',r);return r.json()}
+async function odMeta(rel){const r=await gfetch(odPath(rel));if(r.status===404)return null;if(!r.ok)throw await odErr('lettura',r);return r.json()}
 async function odGet(rel,as){
   const m=await odMeta(rel);if(!m)return null;
-  let r;try{r=await fetch(m['@microsoft.graph.downloadUrl'])}catch(e){r=await gfetch(odPath(rel)+':/content')}if(!r.ok)throw await odErr('download',r);
-  return {etag:m.eTag,data:as==='blob'?await r.blob():await r.text()};
+  const u=m['@microsoft.graph.downloadUrl']||m['@content.downloadUrl'];let r=null;
+  if(u){try{r=await fetch(u)}catch(e){r=null}}
+  if(!r||!r.ok)r=await gfetch(odPath(rel)+':/content');
+  if(!r.ok)throw await odErr('download',r);
+  return {etag:m.cTag||m.eTag,data:as==='blob'?await r.blob():await r.text()};
 }
 /* scrive un file; con etag si rifiuta (412) se nel frattempo è stato cambiato da un altro dispositivo */
 async function odPut(rel,body,type,etag,opt_retry){
   const blob=body instanceof Blob?body:new Blob([body],{type:type||'application/json'});
-  const h=etag?{'If-Match':etag}:{};
+  const h={};
   if(blob.size<3.5*1048576){
     const r=await gfetch(odPath(rel)+':/content',{method:'PUT',headers:{'Content-Type':blob.type||type||'application/octet-stream',...h},body:blob});
     if(r.status===412)throw Object.assign(new Error('conflict'),{code:412});
     if(r.status===404&&!opt_retry){await odEnsureFolders(true);return odPut(rel,body,type,etag,true)}
-    if(!r.ok)throw await odErr('scrittura',r);return (await r.json()).eTag;
+    if(!r.ok)throw await odErr('scrittura',r);{const j=await r.json();return j.cTag||j.eTag}
   }
   const s=await gfetch(odPath(rel)+':/createUploadSession',{method:'POST',headers:{'Content-Type':'application/json',...h},body:JSON.stringify({item:{'@microsoft.graph.conflictBehavior':'replace'}})});
   if(s.status===412)throw Object.assign(new Error('conflict'),{code:412});
   if(!s.ok)throw await odErr('caricamento',s);
   const {uploadUrl}=await s.json(),CH=320*1024*20;let pos=0,last;
   while(pos<blob.size){const end=Math.min(pos+CH,blob.size);last=await fetch(uploadUrl,{method:'PUT',headers:{'Content-Range':`bytes ${pos}-${end-1}/${blob.size}`},body:blob.slice(pos,end)});if(!last.ok&&last.status!==202)throw new Error('chunk '+last.status);pos=end}
-  return (await last.json()).eTag;
+  {const j=await last.json();return j.cTag||j.eTag}
 }
 
 /* messaggio di errore leggibile, con il codice restituito da Microsoft */
@@ -4019,45 +4022,46 @@ async function odEnsureFolders(force){
   OD.folders=true;
 }
 async function odDelete(rel){const r=await gfetch(odPath(rel),{method:'DELETE'});return r.ok||r.status===404}
-async function odList(rel){const r=await gfetch(odPath(rel)+':/children?$select=name,eTag,size,lastModifiedDateTime&$top=999');if(r.status===404)return [];if(!r.ok)throw await odErr('elenco',r);return (await r.json()).value}
+async function odList(rel){const r=await gfetch(odPath(rel)+':/children?$select=name,cTag,eTag,size,lastModifiedDateTime&$top=999');if(r.status===404)return [];if(!r.ok)throw await odErr('elenco',r);return (await r.json()).value}
 
 /* ---------- raccolte: lettura, unione e scrittura ---------- */
 const colFile=c=>'dati/'+c+'.json';
-const parseCol=t=>{try{const j=JSON.parse(t);return Array.isArray(j)?j:(j.docs||[])}catch(e){return []}};
-const setOf=(o,c)=>o[c]||(o[c]=new Set());
-const pending=()=>COLS.some(c=>OD.all[c]||(OD.dirty[c]&&OD.dirty[c].size)||(OD.dead[c]&&OD.dead[c].size));
+/* Ogni scheda ha "_t" (ora dell'ultima modifica); le cancellazioni lasciano una traccia in "deleted".
+   Unendo due versioni vince, scheda per scheda, la modifica più recente: nessun dispositivo sovrascrive il lavoro dell'altro. */
+const parseFile=t=>{try{const j=JSON.parse(t);return Array.isArray(j)?{docs:j,deleted:{}}:{docs:j.docs||[],deleted:j.deleted||{}}}catch(e){return {docs:[],deleted:{}}}};
+const pending=()=>COLS.some(c=>OD.need[c]);
+OD.need={};OD.tomb={};
 async function cacheSave(){
-  await IDB.set('data',{S:Object.fromEntries(COLS.map(c=>[c,S[c]||[]])),etag:OD.etag});
-  await IDB.set('pending',Object.fromEntries(COLS.map(c=>[c,{d:[...(OD.dirty[c]||[])],x:[...(OD.dead[c]||[])],a:!!OD.all[c]}])));
+  await IDB.set('data',{S:Object.fromEntries(COLS.map(c=>[c,S[c]||[]])),etag:OD.etag,tomb:OD.tomb});
+  await IDB.set('need',OD.need);
 }
-/* unisce i dati remoti con le modifiche locali non ancora salvate */
-function mergeCol(c,remote){
-  if(OD.all[c])return S[c];
-  const d=OD.dirty[c]||new Set(),x=OD.dead[c]||new Set(),loc=new Map(S[c].map(o=>[o.id,o]));
-  const out=remote.filter(o=>!x.has(o.id)&&!d.has(o.id));
-  d.forEach(id=>{const o=loc.get(id);if(o)out.push(o)});
-  return out;
+function mergeCol(c,R){
+  const tomb={...(R.deleted||{})},lt=OD.tomb[c]||{},old=Date.now()-90*864e5;let need=false;
+  for(const [id,t] of Object.entries(lt)){if(!(tomb[id]>=t)){tomb[id]=t;need=true}}
+  const map=new Map(),rem=new Map(R.docs.map(o=>[o.id,o]));
+  R.docs.forEach(o=>map.set(o.id,o));
+  for(const o of S[c]||[]){const r=rem.get(o.id);if(!r||(o._t||0)>(r._t||0)){map.set(o.id,o);if(!(tomb[o.id]>=(o._t||0)))need=true}}
+  for(const [id,t] of Object.entries(tomb)){const o=map.get(id);if(o&&t>=(o._t||0))map.delete(id);if(t<old)delete tomb[id]}
+  S[c]=[...map.values()];OD.tomb[c]=tomb;
+  return need;
 }
 async function pullCol(c){
   const f=await odGet(colFile(c));
-  const remote=f?parseCol(f.data):[];
-  S[c]=mergeCol(c,remote);OD.etag[c]=f?f.etag:null;
+  const need=mergeCol(c,f?parseFile(f.data):{docs:[],deleted:{}});
+  OD.etag[c]=f?f.etag:null;if(need)OD.need[c]=true;
 }
 async function pushCol(c){
-  for(let tries=0;tries<4;tries++){
-    const d=new Set(OD.dirty[c]||[]),x=new Set(OD.dead[c]||[]),all=OD.all[c];
-    try{
-      OD.etag[c]=await odPut(colFile(c),JSON.stringify({app:'portafoglio-agente',col:c,saved:new Date().toISOString(),docs:S[c]}),'application/json',OD.etag[c]);
-      d.forEach(id=>OD.dirty[c].delete(id));x.forEach(id=>OD.dead[c].delete(id));if(all)OD.all[c]=false;return;
-    }catch(e){if(e.code!==412)throw e;await pullCol(c)}   /* cambiato altrove: riprendo e riprovo */
-  }
-  throw new Error('conflitto');
+  const m=await odMeta(colFile(c)),cur=m?(m.cTag||m.eTag):null;
+  if(cur!==(OD.etag[c]||null))await pullCol(c);      /* cambiato da un altro dispositivo: prima unisco */
+  OD.need[c]=false;
+  try{OD.etag[c]=await odPut(colFile(c),JSON.stringify({app:'portafoglio-agente',col:c,saved:new Date().toISOString(),docs:S[c],deleted:OD.tomb[c]||{}}),'application/json')}
+  catch(e){OD.need[c]=true;throw e}
 }
 async function odFlush(){
   if(OD.busy){OD.again=true;return}
   if(!OD.ready||!pending())return;
   OD.busy=true;OD.err='';odStatus();
-  try{for(const c of COLS)if(OD.all[c]||(OD.dirty[c]&&OD.dirty[c].size)||(OD.dead[c]&&OD.dead[c].size))await pushCol(c);OD.last=new Date();OD.detail=''}
+  try{for(const c of COLS)if(OD.need[c])await pushCol(c);OD.last=new Date();OD.detail=''}
   catch(e){console.error('[OneDrive] salvataggio',e);OD.detail=OD.detail||String(e&&e.message||e);OD.err=navigator.onLine?'Salvataggio su OneDrive non riuscito ('+OD.detail+'): riprovo tra poco':'Sei offline: le modifiche restano qui e si salvano appena torni online';clearTimeout(OD.timer);OD.timer=setTimeout(odFlush,20000)}
   finally{OD.busy=false;await cacheSave();odStatus();if(OD.again){OD.again=false;odFlush()}}
 }
@@ -4066,8 +4070,8 @@ const odSchedule=()=>{clearTimeout(OD.timer);OD.timer=setTimeout(odFlush,1200);o
 async function odPoll(){
   if(!OD.ready||OD.busy||document.hidden||!navigator.onLine)return;
   try{
-    const L=await odList('dati'),m=new Map(L.map(f=>[f.name,f.eTag]));let ch=false;
-    for(const c of COLS){const e=m.get(c+'.json')||null;if(e!==OD.etag[c]){await pullCol(c);ch=true}}
+    const L=await odList('dati'),m=new Map(L.map(f=>[f.name,f.cTag||f.eTag]));let ch=false;
+    for(const c of COLS){const e=m.get(c+'.json')||null;if(e!==(OD.etag[c]||null)){await pullCol(c);ch=true}}
     if(ch){await cacheSave();softRender()}
     if(pending())odFlush();
   }catch(e){}
@@ -4075,13 +4079,13 @@ async function odPoll(){
 
 /* ---------- sostituti delle funzioni dell'archivio di Claude ---------- */
 save=async function(col,doc,quiet){
+  doc._t=Date.now();
   const i=S[col].findIndex(d=>d.id===doc.id);if(i>=0)S[col][i]=doc;else S[col].push(doc);
-  setOf(OD.dirty,col).add(doc.id);if(OD.dead[col])OD.dead[col].delete(doc.id);
-  cacheSave();odSchedule();if(!quiet)render();
+  OD.need[col]=true;cacheSave();odSchedule();if(!quiet)render();
 };
 remove=async function(col,id,quiet){
-  S[col]=S[col].filter(d=>d.id!==id);setOf(OD.dead,col).add(id);if(OD.dirty[col])OD.dirty[col].delete(id);
-  cacheSave();odSchedule();if(!quiet)render();
+  S[col]=S[col].filter(d=>d.id!==id);(OD.tomb[col]||(OD.tomb[col]={}))[id]=Date.now();
+  OD.need[col]=true;cacheSave();odSchedule();if(!quiet)render();
 };
 
 /* ---------- foto e allegati ---------- */
@@ -4133,7 +4137,7 @@ async function importBackup(file){
   if(!j||j.app!=='portafoglio-agente'||!j.collections)throw new Error('Questo file non è un backup del Portafoglio Agente');
   const ids=Object.keys(j.blobs||{});let n=0;
   for(const id of ids){const x=j.blobs[id],b=await (await fetch(x.data||x)).blob();await odPut('foto/'+id,b,b.type);IDB.set(id,b,'blob');n++;odStatus('Carico le foto: '+n+'/'+ids.length)}
-  for(const c of Object.keys(j.collections)){if(!COLS.includes(c)){COLS.push(c)}S[c]=j.collections[c]||[];OD.all[c]=true}
+  const now=Date.now();for(const c of Object.keys(j.collections)){if(!COLS.includes(c)){COLS.push(c)}const keep=new Set((j.collections[c]||[]).map(o=>o.id)),T=OD.tomb[c]||(OD.tomb[c]={});(S[c]||[]).forEach(o=>{if(!keep.has(o.id))T[o.id]=now});(j.collections[c]||[]).forEach(o=>delete T[o.id]);S[c]=(j.collections[c]||[]).map(o=>({...o,_t:now}));OD.need[c]=true}
   await cacheSave();await odFlush();render();
   return {docs:Object.values(j.collections).reduce((s,a)=>s+(a||[]).length,0),photos:ids.length};
 }
@@ -4175,7 +4179,7 @@ Object.assign(ACT,{
   odBackupNow:async()=>{try{toast('Backup in corso…');const n=await odBackup(true);toast('Backup salvato in OneDrive: '+n)}catch(e){toast('Backup non riuscito: controlla la connessione')}},
   odBackupDl:async()=>{toast('Preparo il backup…');const blobs={};for(const id of blobIds()){const u=await blobLoad(id);if(u){const b=await (await fetch(u)).blob();blobs[id]={type:b.type,data:await blobToData(b)}}}await DL.save({filename:'portafoglio-backup-'+today()+'.json',data:backupJson(blobs)})},
   odSyncNow:async()=>{closeModal();await odPoll();toast('Dati aggiornati')},
-  odLogout:()=>{if(pending()&&!confirm('Ci sono modifiche non ancora salvate su OneDrive. Uscire lo stesso?'))return;tokSave(null);IDB.del('data');IDB.del('pending');sessionStorage.setItem('pa_silent','1');location.reload()},
+  odLogout:()=>{if(pending()&&!confirm('Ci sono modifiche non ancora salvate su OneDrive. Uscire lo stesso?'))return;tokSave(null);IDB.del('data');IDB.del('need');sessionStorage.setItem('pa_silent','1');location.reload()},
   /* idee e migliorie: elenco da passare a Claude per i prossimi aggiornamenti */
   odIdeas:()=>{
     const L=(S.ideas||[]).slice().sort((a,b)=>(a.done-b.done)||String(b.date).localeCompare(String(a.date)));
@@ -4208,9 +4212,9 @@ init=async function(){
   if(red==='ok')sessionStorage.removeItem('pa_silent');
   if(!OD.tok){odGate('login');return}
   /* 1. dati in memoria locale: l'app si apre subito, anche offline */
-  const cache=await IDB.get('data'),pend=await IDB.get('pending');
-  if(cache){COLS.forEach(c=>S[c]=(cache.S&&cache.S[c])||[]);OD.etag=cache.etag||{}}
-  if(pend)Object.entries(pend).forEach(([c,p])=>{OD.dirty[c]=new Set(p.d);OD.dead[c]=new Set(p.x);OD.all[c]=p.a});
+  const cache=await IDB.get('data'),need=await IDB.get('need');
+  if(cache){COLS.forEach(c=>S[c]=(cache.S&&cache.S[c])||[]);OD.etag=cache.etag||{};OD.tomb=cache.tomb||{}}
+  if(need)OD.need=need;
   render();
   /* 2. dati aggiornati da OneDrive */
   try{
