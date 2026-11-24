@@ -3983,30 +3983,43 @@ async function gfetch(url,opt={},retry=true){
   if(r.status===429||r.status===503){const w=(+r.headers.get('Retry-After')||3)*1000;await new Promise(z=>setTimeout(z,w));return gfetch(url,opt,retry)}
   return r;
 }
-async function odMeta(rel){const r=await gfetch(odPath(rel)+'?$select=id,eTag,size,file,@microsoft.graph.downloadUrl');if(r.status===404)return null;if(!r.ok)throw new Error('meta '+r.status);return r.json()}
+async function odMeta(rel){const r=await gfetch(odPath(rel)+'?$select=id,eTag,size,file,@microsoft.graph.downloadUrl');if(r.status===404)return null;if(!r.ok)throw await odErr('lettura',r);return r.json()}
 async function odGet(rel,as){
   const m=await odMeta(rel);if(!m)return null;
-  const r=await fetch(m['@microsoft.graph.downloadUrl']);if(!r.ok)throw new Error('get '+r.status);
+  let r;try{r=await fetch(m['@microsoft.graph.downloadUrl'])}catch(e){r=await gfetch(odPath(rel)+':/content')}if(!r.ok)throw await odErr('download',r);
   return {etag:m.eTag,data:as==='blob'?await r.blob():await r.text()};
 }
 /* scrive un file; con etag si rifiuta (412) se nel frattempo è stato cambiato da un altro dispositivo */
-async function odPut(rel,body,type,etag){
+async function odPut(rel,body,type,etag,opt_retry){
   const blob=body instanceof Blob?body:new Blob([body],{type:type||'application/json'});
   const h=etag?{'If-Match':etag}:{};
   if(blob.size<3.5*1048576){
     const r=await gfetch(odPath(rel)+':/content',{method:'PUT',headers:{'Content-Type':blob.type||type||'application/octet-stream',...h},body:blob});
     if(r.status===412)throw Object.assign(new Error('conflict'),{code:412});
-    if(!r.ok)throw new Error('put '+r.status);return (await r.json()).eTag;
+    if(r.status===404&&!opt_retry){await odEnsureFolders(true);return odPut(rel,body,type,etag,true)}
+    if(!r.ok)throw await odErr('scrittura',r);return (await r.json()).eTag;
   }
   const s=await gfetch(odPath(rel)+':/createUploadSession',{method:'POST',headers:{'Content-Type':'application/json',...h},body:JSON.stringify({item:{'@microsoft.graph.conflictBehavior':'replace'}})});
   if(s.status===412)throw Object.assign(new Error('conflict'),{code:412});
-  if(!s.ok)throw new Error('session '+s.status);
+  if(!s.ok)throw await odErr('caricamento',s);
   const {uploadUrl}=await s.json(),CH=320*1024*20;let pos=0,last;
   while(pos<blob.size){const end=Math.min(pos+CH,blob.size);last=await fetch(uploadUrl,{method:'PUT',headers:{'Content-Range':`bytes ${pos}-${end-1}/${blob.size}`},body:blob.slice(pos,end)});if(!last.ok&&last.status!==202)throw new Error('chunk '+last.status);pos=end}
   return (await last.json()).eTag;
 }
+
+/* messaggio di errore leggibile, con il codice restituito da Microsoft */
+async function odErr(what,r){let c='',m='';try{const j=await r.json();c=(j.error&&j.error.code)||'';m=(j.error&&j.error.message)||''}catch(e){}
+  const e=new Error(what+': HTTP '+r.status+(c?' '+c:'')+(m?' – '+m:''));e.status=r.status;OD.detail=e.message;console.error('[OneDrive]',e.message);return e}
+/* crea le cartelle dell'app se non ci sono */
+async function odEnsureFolders(force){
+  if(OD.folders&&!force)return;
+  const mk=async(parent,name)=>{const r=await gfetch(parent+'/children',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,folder:{},'@microsoft.graph.conflictBehavior':'fail'})});if(!r.ok&&r.status!==409)throw await odErr('cartella '+name,r)};
+  await mk('/me/drive/root',OD_CFG.folder);
+  for(const f of ['dati','foto','backup'])await mk('/me/drive/root:/'+enc(OD_CFG.folder)+':',f);
+  OD.folders=true;
+}
 async function odDelete(rel){const r=await gfetch(odPath(rel),{method:'DELETE'});return r.ok||r.status===404}
-async function odList(rel){const r=await gfetch(odPath(rel)+':/children?$select=name,eTag,size,lastModifiedDateTime&$top=999');if(r.status===404)return [];if(!r.ok)throw new Error('list '+r.status);return (await r.json()).value}
+async function odList(rel){const r=await gfetch(odPath(rel)+':/children?$select=name,eTag,size,lastModifiedDateTime&$top=999');if(r.status===404)return [];if(!r.ok)throw await odErr('elenco',r);return (await r.json()).value}
 
 /* ---------- raccolte: lettura, unione e scrittura ---------- */
 const colFile=c=>'dati/'+c+'.json';
@@ -4044,8 +4057,8 @@ async function odFlush(){
   if(OD.busy){OD.again=true;return}
   if(!OD.ready||!pending())return;
   OD.busy=true;OD.err='';odStatus();
-  try{for(const c of COLS)if(OD.all[c]||(OD.dirty[c]&&OD.dirty[c].size)||(OD.dead[c]&&OD.dead[c].size))await pushCol(c);OD.last=new Date()}
-  catch(e){OD.err=navigator.onLine?'Salvataggio su OneDrive non riuscito: riprovo tra poco':'Sei offline: le modifiche restano qui e si salvano appena torni online';clearTimeout(OD.timer);OD.timer=setTimeout(odFlush,20000)}
+  try{for(const c of COLS)if(OD.all[c]||(OD.dirty[c]&&OD.dirty[c].size)||(OD.dead[c]&&OD.dead[c].size))await pushCol(c);OD.last=new Date();OD.detail=''}
+  catch(e){console.error('[OneDrive] salvataggio',e);OD.detail=OD.detail||String(e&&e.message||e);OD.err=navigator.onLine?'Salvataggio su OneDrive non riuscito ('+OD.detail+'): riprovo tra poco':'Sei offline: le modifiche restano qui e si salvano appena torni online';clearTimeout(OD.timer);OD.timer=setTimeout(odFlush,20000)}
   finally{OD.busy=false;await cacheSave();odStatus();if(OD.again){OD.again=false;odFlush()}}
 }
 const odSchedule=()=>{clearTimeout(OD.timer);OD.timer=setTimeout(odFlush,1200);odStatus()};
@@ -4152,7 +4165,7 @@ Object.assign(ACT,{
     $('#modal').innerHTML=`<div class="scrim" data-act="closeModal"></div><div class="sheet"><header><h3>OneDrive e backup</h3><button class="x" data-act="closeModal" aria-label="Chiudi">×</button></header>
     <p>I dati sono nella cartella <b>${esc(OD_CFG.folder)}</b> del tuo OneDrive${OD.user?' ('+esc(OD.user)+')':''}. Ogni giorno, alla prima apertura, l'app salva da sola un backup nella sottocartella <b>backup</b> (restano gli ultimi 40).</p>
     <div class="acts" style="flex-wrap:wrap"><button class="btn pri" data-act="odBackupNow">Fai un backup adesso</button><button class="btn" data-act="odBackupDl">Scarica backup sul dispositivo</button><button class="btn" data-act="odSyncNow">Aggiorna dagli altri dispositivi</button></div>
-    <h5>Ripristina o trasferisci dati</h5><p class="muted">Carica un file di backup (anche quello esportato dalla versione in Claude). I dati attuali vengono sostituiti: prima viene fatto un backup automatico.</p>
+    ${OD.detail?`<p style="color:var(--bad)"><b>Ultimo errore:</b> <span class="mono">${esc(OD.detail)}</span></p>`:''}<h5>Ripristina o trasferisci dati</h5><p class="muted">Carica un file di backup (anche quello esportato dalla versione in Claude). I dati attuali vengono sostituiti: prima viene fatto un backup automatico.</p>
     <input type="file" accept=".json,application/json" id="odImp"><p id="odImpMsg" class="muted"></p>
     <footer><button class="btn ghost danger" data-act="odLogout">Esci dall'account</button><button class="btn" data-act="closeModal">Chiudi</button></footer></div>`;
     $('#odImp').onchange=async e=>{const f=e.target.files[0];if(!f)return;const m=$('#odImpMsg');
@@ -4202,11 +4215,12 @@ init=async function(){
   /* 2. dati aggiornati da OneDrive */
   try{
     const r=await gfetch('/me/drive?$select=owner');if(r.ok){const j=await r.json();OD.user=((j.owner||{}).user||{}).displayName||''}
+    await odEnsureFolders();
     await Promise.all(COLS.map(pullCol));OD.ready=true;await cacheSave();render();
     if(pending())odFlush();
     odDailyBackup();
   }catch(e){
-    OD.ready=true;OD.err=e.code==='login'?'':'OneDrive non raggiungibile: lavori sui dati di questo dispositivo';render();
+    console.error('[OneDrive] avvio',e);OD.ready=true;OD.err=e.code==='login'?'':'OneDrive non raggiungibile ('+(e.message||e)+'): lavori sui dati di questo dispositivo';render();
   }
   setInterval(odPoll,30000);
   document.addEventListener('visibilitychange',()=>{if(!document.hidden)odPoll();else odFlush()});
