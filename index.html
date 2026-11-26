@@ -4081,6 +4081,7 @@ async function odPoll(){
 save=async function(col,doc,quiet){
   doc._t=Date.now();
   if(col==='clients'&&ui.comp&&ui.view==='clienti'&&!byId('clients',doc.id))doc.competitor=true;
+  if(col==='clients'&&!ui.comp&&ui.view==='clienti'&&ui.ctab==='util'&&!byId('clients',doc.id))doc.kind='utilizzatore';
   const i=S[col].findIndex(d=>d.id===doc.id);if(i>=0)S[col][i]=doc;else S[col].push(doc);
   OD.need[col]=true;cacheSave();odSchedule();if(!quiet)render();
 };
@@ -4236,7 +4237,7 @@ clientList=withTodoFilter(clientList,'clients');
 companyList=withTodoFilter(companyList,'companies');
 ACT.todoToggle=()=>{ui.todo=!ui.todo;render()};
 clientList=compWrap(clientList);
-const _setViewTodo=setView;setView=function(v){ui.todo=false;ui.comp=false;_setViewTodo(v)};
+const _setViewTodo=setView;setView=function(v){ui.todo=false;ui.comp=false;ui.ctab='cli';ui.utilCo='';_setViewTodo(v)};
 function markTodo(){
   const col=ui.view==='clienti'?'clients':ui.view==='aziende'?'companies':null;if(!col)return;
   document.querySelectorAll('#app .row[data-act="sel"]').forEach(r=>{const e=byId(col,r.dataset.id);if(e&&todoMiss(e).length&&!r.querySelector('.todo')){const b=document.createElement('span');b.className='pill warn todo';b.textContent='Da completare';const st=r.querySelector('.r2 .pill');if(st){const w=document.createElement('span');w.style.cssText='display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end';st.replaceWith(w);w.append(b,st)}else{(r.querySelector('b')||r).after(b)}}});
@@ -4395,6 +4396,73 @@ function collDecorate(){
   if(ui.view==='clienti'&&ui.sel){const a=document.querySelector('#app .dhead .acts');if(a&&!a.querySelector('[data-act="clientToColleague"]'))a.insertAdjacentHTML('beforeend',`<button class="btn" data-act="clientToColleague" data-id="${ui.sel}">Sposta in Colleghi agenti</button>`)}
 }
 
+/* ---------- Clienti: schede «Clienti», «Utilizzatori», «Inattivi» ---------- */
+const isUtil=c=>c&&c.kind==='utilizzatore';
+const cliTab=c=>isUtil(c)?'util':(c.status==='Inattivo'?'inatt':'cli');
+ui.ctab='cli';
+const CTABS=[['cli','Clienti'],['util','Utilizzatori'],['inatt','Inattivi']];
+function tabsWrap(fn){return function(){
+  if(ui.comp)return fn();
+  const all=S.clients,cnt=t=>all.filter(c=>!isComp(c)&&cliTab(c)===t).length;
+  let L=all.filter(c=>cliTab(c)===ui.ctab);
+  if(ui.ctab==='util'&&ui.utilCo)L=L.filter(c=>(c.interestIds||[]).includes(ui.utilCo));
+  S.clients=L;let h;try{h=fn()}finally{S.clients=all}
+  const tabs=`<div class="acts" style="margin-bottom:8px;gap:4px">${CTABS.map(([k,l])=>`<button class="btn sm ${ui.ctab===k?'pri':''}" data-act="ctab" data-t="${k}">${l} (${cnt(k)})</button>`).join('')}</div>`;
+  const used=ui.ctab==='util'?S.companies.filter(co=>all.some(c=>isUtil(c)&&(c.interestIds||[]).includes(co.id))).sort((a,b)=>a.name.localeCompare(b.name,'it')):[];
+  const flt=used.length?`<select data-ch2="utilCo" aria-label="Filtra per azienda di interesse" style="width:100%;margin-bottom:8px"><option value="">Tutte le aziende di interesse</option>${used.map(c=>`<option value="${c.id}" ${ui.utilCo===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>`:'';
+  const i=h.indexOf('<div class="acts');
+  return i>=0?h.slice(0,i)+tabs+flt+h.slice(i):tabs+flt+h;
+}}
+clientList=tabsWrap(clientList);
+document.addEventListener('change',e=>{if(e.target.dataset&&e.target.dataset.ch2==='utilCo'){ui.utilCo=e.target.value;render()}});
+function pickCompanies(title,note,sel0,onOk){
+  const sel=new Set(sel0||[]);
+  $('#modal').innerHTML=`<div class="scrim" data-act="closeModal"></div><div class="sheet"><header><h3>${esc(title)}</h3><button class="x" data-act="closeModal" aria-label="Chiudi">×</button></header><p class="muted">${esc(note)}</p>
+  <div style="max-height:50vh;overflow:auto;display:flex;flex-direction:column;gap:4px">${S.companies.slice().sort((a,b)=>a.name.localeCompare(b.name,'it')).map(c=>`<label style="display:flex;gap:8px;align-items:center;padding:4px 0"><input type="checkbox" data-pickco="${c.id}" ${sel.has(c.id)?'checked':''}> ${esc(c.name)}</label>`).join('')}</div>
+  <footer><button class="btn ghost" data-act="closeModal">Annulla</button><button class="btn pri" id="pickCoOk">Salva</button></footer></div>`;
+  $('#pickCoOk').onclick=async()=>{const ids=[...document.querySelectorAll('[data-pickco]')].filter(x=>x.checked).map(x=>x.dataset.pickco);closeModal();await onOk(ids)};
+}
+Object.assign(ACT,{
+  ctab:d=>{ui.ctab=d.t;ui.sel=null;ui.utilCo='';ui.todo=false;render()},
+  toUtil:async d=>{const c=byId('clients',d.id),to=!isUtil(c);await save('clients',{...c,kind:to?'utilizzatore':''},true);ui.sel=null;render();toast(c.name+(to?' spostato in Utilizzatori':' riportato tra i Clienti'))},
+  toInatt:async d=>{const c=byId('clients',d.id),to=c.status!=='Inattivo';await save('clients',{...c,status:to?'Inattivo':'Attivo'},true);ui.sel=null;render();toast(c.name+(to?' segnato come inattivo':' di nuovo attivo'))},
+  utilCos:d=>{const c=byId('clients',d.id);pickCompanies('Aziende di interesse · '+c.name,'Spunta le aziende i cui prodotti possono interessare a questo utilizzatore: le userai per le campagne marketing mirate.',c.interestIds,ids=>save('clients',{...c,interestIds:ids}))}
+});
+const _cdUtil=clientDetail;clientDetail=function(c){
+  let h=_cdUtil(c);if(!isUtil(c))return h;
+  const cos=(c.interestIds||[]).map(id=>byId('companies',id)).filter(Boolean);
+  const sec=`<section class="sec"><header><h3>Aziende di interesse</h3><button class="btn sm" data-act="utilCos" data-id="${c.id}">Scegli aziende</button></header>${cos.length?`<div class="chips">${cos.map(x=>`<span class="chip">${esc(x.name)}</span>`).join('')}</div>`:'<p class="muted">Nessuna. Premi «Scegli aziende» per indicare cosa può interessargli: ti servirà per le campagne marketing.</p>'}</section>`;
+  const i=h.indexOf('<section class="sec">');return i>=0?h.slice(0,i)+sec+h.slice(i):h+sec;
+};
+function utilDecorate(){
+  if(ui.view!=='clienti'||ui.comp||ui.qid||ui.pl)return;
+  if(ui.ctab==='util'){$('#title').textContent='Utilizzatori';const b=$('#topAct .btn.pri');if(b)b.textContent='+ Nuovo utilizzatore'}
+  else if(ui.ctab==='inatt')$('#title').textContent='Clienti inattivi';
+  const c=ui.sel&&byId('clients',ui.sel),a=document.querySelector('#app .dhead .acts');
+  if(c&&a&&!a.querySelector('[data-act="toUtil"]'))a.insertAdjacentHTML('beforeend',`<button class="btn" data-act="toUtil" data-id="${c.id}">${isUtil(c)?'Riporta tra i Clienti':'Sposta in Utilizzatori'}</button><button class="btn" data-act="toInatt" data-id="${c.id}">${c.status==='Inattivo'?'Segna come attivo':'Segna come inattivo'}</button>`);
+}
+/* marketing: scelta dei destinatari per gruppo e per azienda di interesse */
+const _mkPick=ACT.mkPickRc;
+ACT.mkPickRc=function(){
+  _mkPick();
+  const pool=[];
+  const grp=c=>isComp(c)?'Concorrenti':isUtil(c)?'Utilizzatori':c.status==='Inattivo'?'Clienti inattivi':'Clienti';
+  const order=['Clienti','Utilizzatori','Clienti inattivi','Concorrenti'];
+  S.clients.slice().sort((a,b)=>order.indexOf(grp(a))-order.indexOf(grp(b))||a.name.localeCompare(b.name,'it')).forEach(c=>secMails(c).forEach(m=>pool.push({g:grp(c),owner:c.name,name:m.who||c.name,email:m.e,sec:(c.sectorIds||[]),co:[...new Set([...(c.interestIds||[]),...(c.links||[]).map(l=>l.companyId)])]})));
+  S.companies.slice().sort((a,b)=>a.name.localeCompare(b.name,'it')).forEach(c=>secMails(c).forEach(m=>pool.push({g:'Aziende',owner:c.name,name:m.who||c.name,email:m.e,sec:[],co:[c.id]})));
+  (S.colleagues||[]).forEach(g=>g.email&&pool.push({g:'Colleghi agenti',owner:g.name,name:g.name,email:g.email,sec:[],co:g.companyIds||[]}));
+  MKF.pool=pool;
+  const rs=$('#mkRs');if(!rs)return;
+  rs.insertAdjacentHTML('afterend',`<select id="mkRg"><option value="">Tutti i gruppi</option>${[...order,'Aziende','Colleghi agenti'].map(g=>`<option ${g==='Clienti'?'':''}>${g}</option>`).join('')}</select><select id="mkRco"><option value="">Qualsiasi azienda di interesse</option>${S.companies.slice().sort((a,b)=>a.name.localeCompare(b.name,'it')).map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select>`);
+  const draw=()=>{const q=$('#mkRq').value.trim().toLowerCase(),s=$('#mkRs').value,g=$('#mkRg').value,co=$('#mkRco').value;let last='';
+    const vis=MKF.pool.map((x,i)=>({x,i})).filter(({x})=>(!s||x.sec.includes(s))&&(!g||x.g===g)&&(!co||x.co.includes(co))&&(!q||(x.owner+' '+x.name+' '+x.email).toLowerCase().includes(q)));
+    MKF.vis=vis.map(v=>v.i);
+    $('#mkRl').innerHTML=vis.map(({x,i})=>{const h=x.g!==last?`<h4 style="margin:10px 0 4px">${x.g}</h4>`:'';last=x.g;
+      return h+`<label class="chk" style="display:flex;gap:8px;align-items:center;padding:3px 0"><input type="checkbox" data-mkrc="${i}" ${MKF.sel.has(x.email.toLowerCase())?'checked':''}> <span><b>${esc(x.owner)}</b>${x.name&&x.name!==x.owner?' · '+esc(x.name):''} <span class="muted">${esc(x.email)}</span></span></label>`}).join('')||'<p class="muted">Nessun contatto con email.</p>';
+    $('#mkRn').textContent=MKF.sel.size+' selezionati'};
+  MKF.draw=draw;$('#mkRq').oninput=draw;$('#mkRs').onchange=draw;$('#mkRg').onchange=draw;$('#mkRco').onchange=draw;draw();
+};
+
 /* ---------- più numeri di telefono per clienti e aziende ---------- */
 const PHONES_F={k:'phones',label:'Altri numeri di telefono (uno per riga, es. Magazzino: 0721 123456)',type:'textarea',rows:3,full:true};
 [CLIENT_F,COMPANY_F].forEach(F=>{if(F.some(f=>f.k==='phones'))return;const i=F.findIndex(f=>f.k==='phone');F.splice(i<0?F.length:i+1,0,PHONES_F)});
@@ -4423,7 +4491,7 @@ const _renderOD=render;
 document.head.insertAdjacentHTML('beforeend','<style>.row.inactive{border-left:4px solid var(--bad);background:var(--bad-soft)}.row.inactive b{color:var(--bad)}.dhead.inactive h2{color:var(--bad)}</style>');
 render=function(){
   _renderOD();
-  markTodo();compDecorate();collDecorate();
+  markTodo();compDecorate();collDecorate();utilDecorate();
   if(ui.view==='aziende'){const sp=document.querySelector('#app .split.h');if(sp)sp.classList.remove('h')}
   navOrder();
   document.querySelectorAll('#app .pill.bad').forEach(p=>{if(p.textContent.trim()!=='Inattivo')return;const r=p.closest('.row')||p.closest('.dhead');if(r)r.classList.add('inactive')});
@@ -4443,7 +4511,7 @@ function odGate(kind,extra){
 Object.assign(ACT,{
   odMenu:()=>{
     $('#modal').innerHTML=`<div class="scrim" data-act="closeModal"></div><div class="sheet"><header><h3>OneDrive e backup</h3><button class="x" data-act="closeModal" aria-label="Chiudi">×</button></header>
-    <p class="muted" style="margin:0">Versione app: 26/11/2026 · 8</p><p>I dati sono nella cartella <b>${esc(OD_CFG.folder)}</b> del tuo OneDrive${OD.user?' ('+esc(OD.user)+')':''}. Ogni giorno, alla prima apertura, l'app salva da sola un backup nella sottocartella <b>backup</b> (restano gli ultimi 40).</p>
+    <p class="muted" style="margin:0">Versione app: 26/11/2026 · 9</p><p>I dati sono nella cartella <b>${esc(OD_CFG.folder)}</b> del tuo OneDrive${OD.user?' ('+esc(OD.user)+')':''}. Ogni giorno, alla prima apertura, l'app salva da sola un backup nella sottocartella <b>backup</b> (restano gli ultimi 40).</p>
     <div class="acts" style="flex-wrap:wrap"><button class="btn pri" data-act="odBackupNow">Fai un backup adesso</button><button class="btn" data-act="odBackupDl">Scarica backup sul dispositivo</button><button class="btn" data-act="odSyncNow">Aggiorna dagli altri dispositivi</button></div>
     ${OD.detail?`<p style="color:var(--bad)"><b>Ultimo errore:</b> <span class="mono">${esc(OD.detail)}</span></p>`:''}<h5>Aggiungi dati o ripristina un backup</h5><p class="muted">Carica un file preparato da Claude (es. clienti di un'azienda: si <b>aggiungono</b> ai tuoi dati) oppure un file di backup (<b>sostituisce</b> i dati attuali). In entrambi i casi prima viene fatto un backup automatico.</p>
     <input type="file" accept=".json,application/json" id="odImp"><p id="odImpMsg" class="muted"></p>
