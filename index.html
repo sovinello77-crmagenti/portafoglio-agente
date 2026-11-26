@@ -4080,6 +4080,7 @@ async function odPoll(){
 /* ---------- sostituti delle funzioni dell'archivio di Claude ---------- */
 save=async function(col,doc,quiet){
   doc._t=Date.now();
+  if(col==='clients'&&ui.comp&&ui.view==='clienti'&&!byId('clients',doc.id))doc.competitor=true;
   const i=S[col].findIndex(d=>d.id===doc.id);if(i>=0)S[col][i]=doc;else S[col].push(doc);
   OD.need[col]=true;cacheSave();odSchedule();if(!quiet)render();
 };
@@ -4176,6 +4177,184 @@ async function importMerge(j,P){
 }
 
 
+
+/* ---------- aggiunta di contatti (es. da Outlook): aziende e clienti, completa senza sovrascrivere ---------- */
+const LEG=new Set('srl spa snc sas srls sapa sa unipersonale societa soc coop sc scarl scrl ditta dei di f lli flli e c ec'.split(' '));
+const clKey=n=>String(n||'').toLowerCase().replace(/&/g,' e ').replace(/\b(s\.?\s?r\.?\s?l\.?s?|s\.?\s?p\.?\s?a\.?|s\.?\s?n\.?\s?c\.?|s\.?\s?a\.?\s?s\.?)(?=\W|$)/g,' ').split(/[^a-z0-9àèéìòù]+/).filter(t=>t&&!LEG.has(t)).join('');
+function mergePlan2(j){
+  const coFind=o=>S.companies.find(c=>mzCo(c.name)===mzCo(o.name))||S.companies.find(c=>(o.match||[]).some(k=>mzN(c.name).includes(mzN(k))))||null;
+  const clFind=o=>{const k=clKey(o.name);return S.clients.find(c=>clKey(c.name)===k)||null};
+  const cos=(j.companies||[]).map(o=>({o,c:coFind(o)})),cls=(j.clients||[]).map(o=>({o,c:clFind(o)}));
+  const n=a=>a.reduce((s,x)=>s+(x.o.contacts||[]).length,0);
+  return {cos,cls,coNew:cos.filter(x=>!x.c).length,coUpd:cos.filter(x=>x.c).length,clNew:cls.filter(x=>!x.c).length,clUpd:cls.filter(x=>x.c).length,cts:n(cos)+n(cls)};
+}
+function fillEntity(e,o){
+  ['address','zip','city','prov','vat','phone','fax','email','web','pec'].forEach(k=>{if(o[k]&&!e[k])e[k]=o[k]});
+  const dg=x=>String(x||'').replace(/^.*?:\s*(?=[+\d])/,'').replace(/\D/g,'').replace(/^(00)?39(?=\d{6,})/,'');
+  const ph=new Set([e.phone,...String(e.phones||'').split(/\n/)].map(dg).filter(Boolean));
+  const extra=[o.phone,...String(o.phones||'').split(/\n/)].map(x=>String(x||'').trim()).filter(x=>x&&!ph.has(dg(x)));
+  if(extra.length)e.phones=[e.phones,...extra].filter(Boolean).join('\n');
+  if(o.notes&&!String(e.notes||'').includes(o.notes))e.notes=[e.notes,o.notes].filter(Boolean).join('\n');
+  e.contacts=(e.contacts||[]).map(x=>({...x}));
+  for(const k of o.contacts||[]){
+    const x=e.contacts.find(y=>(k.email&&y.email&&y.email.toLowerCase()===k.email.toLowerCase())||(y.name&&k.name&&mzN(y.name)===mzN(k.name)));
+    if(x){Object.entries(k).forEach(([f,v])=>{if(v&&!x[f])x[f]=v})}else e.contacts.push({...k});
+  }
+  return e;
+}
+async function importMerge2(j,P){
+  const sec=async n=>{let s=S.sectors.find(x=>x.name.toLowerCase()===n.toLowerCase());if(!s){s={id:uid(),name:n};await save('sectors',s,true)}return s.id};
+  for(const {o,c} of P.cos){const {match,sectors,...f}=o;const e=c?fillEntity({...c},f):fillEntity({id:uid(),name:f.name,contacts:[]},f);await save('companies',e,true)}
+  for(const g of j.colleagues||[]){
+    if(S.colleagues.some(x=>mzN(x.name)===mzN(g.name)))continue;
+    const ids=(g.companyNames||[]).map(n=>{const c=S.companies.find(c=>mzCo(c.name)===mzCo(n)||mzN(c.name).includes(mzN(n)));return c&&c.id}).filter(Boolean);
+    const {companyNames,...f}=g;await save('colleagues',{id:uid(),agency:'',phone:'',mobile:'',email:'',city:'',prov:'',zones:'',otherCompanies:'',notes:'',...f,companyIds:ids},true);
+  }
+  let n=0;
+  for(const {o,c} of P.cls){
+    const {sectors,...f}=o;const e=c?fillEntity({...c,links:c.links||[]},f):fillEntity({id:uid(),name:f.name,status:'Attivo',contacts:[],links:[],sectorIds:[]},f);
+    const ids=new Set(e.sectorIds||[]);for(const s of sectors||[])ids.add(await sec(s));e.sectorIds=[...ids];if(o.competitor)e.competitor=true;
+    await save('clients',e,true);if(++n%50===0)odStatus('Importo clienti: '+n+'/'+P.cls.length);
+  }
+  render();
+}
+
+
+/* ---------- "da completare": clienti e aziende senza provincia o città ---------- */
+const todoMiss=e=>[!String(e.city||'').trim()&&'città',!String(e.prov||'').trim()&&'provincia'].filter(Boolean);
+function withTodoFilter(fn,col){
+  return function(){
+    const all=S[col],n=all.filter(e=>todoMiss(e).length).length;
+    const btn=n||ui.todo?`<button class="btn sm ${ui.todo?'pri':''}" data-act="todoToggle">${ui.todo?'✓ ':''}Da completare (${n})</button>`:'';
+    let h;if(!ui.todo)h=fn();else{S[col]=all.filter(e=>todoMiss(e).length);try{h=fn()}finally{S[col]=all}}
+    if(!btn)return h;
+    if(col==='companies')return '<div class="acts">'+btn+'</div>'+h;
+    const i=h.indexOf('<div class="acts');if(i>=0){const j=h.indexOf('>',i)+1;return h.slice(0,j)+btn+h.slice(j)}
+    return '<div><div class="acts" style="margin-bottom:8px">'+btn+'</div>'+h+'</div>';
+  };
+}
+clientList=withTodoFilter(clientList,'clients');
+companyList=withTodoFilter(companyList,'companies');
+ACT.todoToggle=()=>{ui.todo=!ui.todo;render()};
+clientList=compWrap(clientList);
+const _setViewTodo=setView;setView=function(v){ui.todo=false;ui.comp=false;_setViewTodo(v)};
+function markTodo(){
+  const col=ui.view==='clienti'?'clients':ui.view==='aziende'?'companies':null;if(!col)return;
+  document.querySelectorAll('#app .row[data-act="sel"]').forEach(r=>{const e=byId(col,r.dataset.id);if(e&&todoMiss(e).length&&!r.querySelector('.todo')){const b=document.createElement('span');b.className='pill warn todo';b.textContent='Da completare';const st=r.querySelector('.r2 .pill');if(st){const w=document.createElement('span');w.style.cssText='display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end';st.replaceWith(w);w.append(b,st)}else{(r.querySelector('b')||r).after(b)}}});
+  const e=ui.sel&&byId(col,ui.sel),t=document.querySelector('#app .dhead .t');
+  if(e&&t&&todoMiss(e).length&&!t.querySelector('.todo'))t.insertAdjacentHTML('beforeend',`<span class="pill warn todo">Da completare: ${esc(todoMiss(e).join(', '))}</span>`);
+}
+
+
+/* ---------- cartella Concorrenti: clienti segnati come concorrenti, in una sezione a parte ---------- */
+const isComp=c=>!!(c&&c.competitor);
+function compWrap(fn){return function(){const all=S.clients;S.clients=all.filter(c=>isComp(c)===!!ui.comp);try{return fn()}finally{S.clients=all}}}
+ACT.navComp=()=>{setView('clienti');ui.comp=true;render()};
+ACT.compToggle=async d=>{const c=byId('clients',d.id);if(!c)return;const to=!isComp(c);await save('clients',{...c,competitor:to},true);ui.sel=null;render();toast(c.name+(to?' spostato in Concorrenti':' riportato tra i Clienti'))};
+function compDecorate(){
+  const nav=$('#nav');if(nav&&!nav.querySelector('[data-act="navComp"]')){
+    const cl=nav.querySelector('[data-v="clienti"]'),nc=S.clients.filter(isComp).length;
+    if(cl){cl.querySelector('.n').textContent=S.clients.length-nc;cl.insertAdjacentHTML('afterend',`<button data-act="navComp" ${ui.view==='clienti'&&ui.comp?'aria-current="page"':''}><span>Concorrenti</span><span class="n">${nc}</span></button>`);if(ui.comp)cl.removeAttribute('aria-current')}
+  }
+  if(ui.view!=='clienti'||ui.qid||ui.pl)return;
+  if(ui.comp){$('#title').textContent='Concorrenti';const b=$('#topAct .btn.pri');if(b)b.textContent='+ Nuovo concorrente';const g=$('#gq');if(g)g.placeholder='Cerca concorrente…'}
+  const c=ui.sel&&byId('clients',ui.sel),a=document.querySelector('#app .dhead .acts');
+  if(c&&a&&!a.querySelector('[data-act="compToggle"]'))a.insertAdjacentHTML('beforeend',`<button class="btn" data-act="compToggle" data-id="${c.id}">${isComp(c)?'Riporta tra i Clienti':'Sposta in Concorrenti'}</button>`);
+}
+
+/* ---------- Colleghi agenti: elenco, aziende rappresentate e zone ---------- */
+COLS.push('colleagues');S.colleagues=[];
+TITLES.colleghi='Colleghi agenti';
+const REGIONI=['Abruzzo','Basilicata','Calabria','Campania','Emilia-Romagna','Emilia Romagna','Friuli','Lazio','Liguria','Lombardia','Marche','Molise','Piemonte','Puglia','Sardegna','Sicilia','Toscana','Trentino','Alto Adige','Umbria','Valle d\'Aosta','Veneto'];
+const findZones=t=>[...new Set(REGIONI.filter(r=>new RegExp('\\b'+r.replace(/[-\s]/g,'[-\\s]')+'\\b','i').test(String(t||''))).map(r=>r.replace('Emilia Romagna','Emilia-Romagna')))].join(', ');
+const colCos=g=>(g.companyIds||[]).map(id=>byId('companies',id)).filter(Boolean);
+const COLL_F=[{k:'name',label:'Nome e cognome',full:true},{k:'agency',label:'Agenzia / ragione sociale (facoltativo)',full:true},
+  {k:'mobile',label:'Cellulare',type:'tel'},{k:'phone',label:'Telefono',type:'tel'},{k:'email',label:'Email',type:'email'},{k:'city',label:'Città'},{k:'prov',label:'Provincia'},
+  {k:'zones',label:'Zone di competenza (es. Campania, Basilicata, prov. di Salerno)',type:'textarea',rows:2,full:true},
+  {k:'otherCompanies',label:'Altre aziende che rappresenta (non tue, una per riga)',type:'textarea',rows:3,full:true},
+  {k:'notes',label:'Note',type:'textarea',rows:3,full:true}];
+ui.gq='';
+function collList(){
+  const q=ui.gq.trim().toLowerCase(),L=S.colleagues.filter(g=>!q||[g.name,g.agency,g.zones,g.otherCompanies,g.city,...colCos(g).map(c=>c.name)].join(' ').toLowerCase().includes(q)).sort((a,b)=>String(a.name).localeCompare(String(b.name),'it'));
+  const srch=`<input id="gqColl" data-in="gqColl" type="search" placeholder="Cerca nome, azienda, zona…" value="${esc(ui.gq)}" style="width:100%;margin-bottom:8px">`;
+  if(!S.colleagues.length)return `<div class="list"><div class="empty"><h3>Nessun collega</h3><span>Aggiungi i colleghi agenti con le aziende che rappresentano e le loro zone. Puoi anche spostarli qui da un contatto (pulsante «→ Colleghi» sulla scheda del contatto).</span><button class="btn pri" data-act="collNew">Nuovo collega</button></div></div>`;
+  return `<div class="list">${srch}${L.map(g=>`<button class="row" data-act="collSel" data-id="${g.id}" aria-selected="${ui.csel===g.id}"><b>${esc(g.name)}</b><span>${esc([colCos(g).map(c=>c.name).join(', '),g.zones].filter(Boolean).join(' · '))}</span></button>`).join('')||'<p class="muted">Nessun risultato.</p>'}</div>`;
+}
+function collDetail(g){
+  const mine=colCos(g),others=String(g.otherCompanies||'').split(/\n/).map(x=>x.trim()).filter(Boolean);
+  const chips=a=>a.length?`<div class="chips">${a.join('')}</div>`:'';
+  return `<div class="detail"><button class="back" data-act="collBack">← Tutti i colleghi</button>
+  <div class="dhead"><div class="t"><h2>${esc(g.name)}</h2>${g.agency?`<span class="muted">${esc(g.agency)}</span>`:''}</div><div class="acts"><button class="btn" data-act="collEdit" data-id="${g.id}">Modifica</button><button class="btn" data-act="collToContact" data-id="${g.id}">Rimetti tra i contatti</button><button class="btn ghost danger" data-act="collDel" data-id="${g.id}">Elimina</button></div></div>
+  <section class="sec"><header><h3>Recapiti</h3></header><dl class="kv">${kv('Cellulare',telL(g.mobile))}${kv('Telefono',telL(g.phone))}${kv('Email',mailL(g.email))}${kv('Città',esc([g.city,g.prov&&'('+g.prov+')'].filter(Boolean).join(' ')))}${kv('Note',esc(g.notes))}</dl></section>
+  <section class="sec"><header><h3>Aziende in comune con te</h3><button class="btn sm" data-act="collCos" data-id="${g.id}">Scegli aziende</button></header>${chips(mine.map(c=>`<button class="btn sm" data-act="collGoCo" data-id="${c.id}">${esc(c.name)}</button>`))||'<p class="muted">Nessuna. Premi «Scegli aziende» e spunta le tue aziende che rappresenta anche lui.</p>'}</section>
+  <section class="sec"><header><h3>Altre aziende che rappresenta</h3></header>${chips(others.map(x=>`<span class="chip">${esc(x)}</span>`))||'<p class="muted">Nessuna indicata. Si aggiungono da «Modifica».</p>'}</section>
+  <section class="sec"><header><h3>Zone di competenza</h3></header>${g.zones?`<p style="margin:0;white-space:pre-line">${esc(g.zones)}</p>`:'<p class="muted">Non indicate. Si aggiungono da «Modifica».</p>'}</section></div>`;
+}
+function collView(){const g=ui.csel&&byId('colleagues',ui.csel);return `<div class="split ${g?'has-sel':''}">${collList()}${g?collDetail(g):'<div class="empty detail"><span>Seleziona un collega per vedere aziende e zone.</span></div>'}</div>`}
+function collPickCos(g){
+  const sel=new Set(g.companyIds||[]);
+  $('#modal').innerHTML=`<div class="scrim" data-act="closeModal"></div><div class="sheet"><header><h3>Aziende in comune · ${esc(g.name)}</h3><button class="x" data-act="closeModal" aria-label="Chiudi">×</button></header>
+  <p class="muted">Spunta le tue aziende che rappresenta anche questo collega.</p>
+  <div style="max-height:50vh;overflow:auto;display:flex;flex-direction:column;gap:4px">${S.companies.slice().sort((a,b)=>a.name.localeCompare(b.name,'it')).map(c=>`<label style="display:flex;gap:8px;align-items:center;padding:4px 0"><input type="checkbox" data-collco="${c.id}" ${sel.has(c.id)?'checked':''}> ${esc(c.name)}</label>`).join('')}</div>
+  <footer><button class="btn ghost" data-act="closeModal">Annulla</button><button class="btn pri" id="collCoOk">Salva</button></footer></div>`;
+  $('#collCoOk').onclick=async()=>{const ids=[...document.querySelectorAll('[data-collco]')].filter(x=>x.checked).map(x=>x.dataset.collco);closeModal();await save('colleagues',{...g,companyIds:ids})};
+}
+async function contactToColleague(col,ent,i){
+  const ct=(ent.contacts||[])[i];if(!ct)return;
+  const txt=[ct.name,ct.role,ct.notes].join(' ');
+  const g={id:uid(),name:String(ct.name||'').replace(/\b(agente|ag)\b\.?/ig,'').replace(/\s+/g,' ').replace(/^[\s\-–]+|[\s\-–]+$/g,'')||ct.name||'',agency:col==='clients'?ent.name:'',
+    mobile:ct.mobile||'',phone:ct.phone||'',email:ct.email||ct.emailPers||'',city:'',prov:'',zones:findZones(txt),otherCompanies:'',
+    companyIds:col==='companies'?[ent.id]:[],notes:[ct.role&&'Ruolo: '+ct.role,ct.notes,'Spostato dai contatti di '+ent.name].filter(Boolean).join('\n')};
+  await save('colleagues',g,true);
+  await save(col,{...ent,contacts:ent.contacts.filter((_,j)=>j!==i)},true);
+  return g;
+}
+Object.assign(ACT,{
+  navColl:()=>{ui.csel=null;setView('colleghi')},
+  collBack:()=>{ui.csel=null;render()},
+  collSel:d=>{ui.csel=d.id;render();$('#app').scrollTop=0},
+  collNew:()=>openForm('Nuovo collega agente',COLL_F,{},async o=>{const g={...o,id:uid(),companyIds:[]};await save('colleagues',g,true);ui.view='colleghi';ui.csel=g.id;render()}),
+  collEdit:d=>{const g=byId('colleagues',d.id);openForm('Modifica collega',COLL_F,g,o=>save('colleagues',{...g,...o}))},
+  collCos:d=>collPickCos(byId('colleagues',d.id)),
+  collGoCo:d=>{setView('aziende');ui.csel=d.id;render()},
+  collDel:d=>{const g=byId('colleagues',d.id);confirmBox('Eliminare il collega '+esc(g.name)+'?',async()=>{await remove('colleagues',g.id,true);ui.csel=null;render()})},
+  collToContact:d=>{const g=byId('colleagues',d.id),cos=colCos(g);
+    const opts=[...cos.map(c=>['companies|'+c.id,'Contatto di '+c.name]),...S.companies.filter(c=>!cos.includes(c)).sort((a,b)=>a.name.localeCompare(b.name,'it')).map(c=>['companies|'+c.id,'Azienda: '+c.name])];
+    if(!opts.length){toast('Nessuna azienda a cui riassegnarlo');return}
+    openForm('Rimetti tra i contatti',[{k:'to',label:'Dove',type:'select',opts,full:true}],{},async o=>{const [col,id]=o.to.split('|'),e=byId(col,id);
+      await save(col,{...e,contacts:[...(e.contacts||[]),{name:g.name,role:'Agente'+(g.zones?' '+g.zones:''),email:g.email,emailPers:'',phone:g.phone,mobile:g.mobile,notes:g.notes||''}]},true);await remove('colleagues',g.id,true);ui.csel=null;render();toast(g.name+' rimesso tra i contatti di '+e.name)})},
+  toColleague:d=>{const e=byId(d.col,d.id),ct=e&&(e.contacts||[])[+d.i];if(!ct)return;
+    confirmBox('Spostare <b>'+esc(ct.name)+'</b> dai contatti di '+esc(e.name)+' alla cartella <b>Colleghi agenti</b>?'+(d.col==='companies'?' Verrà collegato a '+esc(e.name)+' come azienda in comune.':''),async()=>{const g=await contactToColleague(d.col,e,+d.i);render();toast(g.name+' spostato in Colleghi agenti')},'Sposta')},
+  clientToColleague:d=>{const c=byId('clients',d.id);
+    confirmBox('Spostare <b>'+esc(c.name)+'</b> dai clienti alla cartella <b>Colleghi agenti</b>? La scheda cliente viene tolta (prima conviene un backup se ci sono preventivi collegati).',async()=>{
+      const ct=(c.contacts||[])[0]||{};
+      const g={id:uid(),name:c.name,agency:'',mobile:ct.mobile||'',phone:c.phone||ct.phone||'',email:c.email||ct.email||'',city:c.city||'',prov:c.prov||'',zones:findZones([c.notes,c.city].join(' ')),otherCompanies:'',companyIds:[],
+        notes:[c.notes,(c.contacts||[]).map(x=>[x.name,x.role,x.mobile,x.email].filter(Boolean).join(' · ')).join('\n')].filter(Boolean).join('\n')};
+      await save('colleagues',g,true);await remove('clients',c.id,true);setView('colleghi');ui.csel=g.id;render();toast(c.name+' spostato in Colleghi agenti')},'Sposta')}
+});
+document.addEventListener('input',e=>{if(e.target.dataset&&e.target.dataset.in==='gqColl'){ui.gq=e.target.value;const p=e.target.selectionStart;render();const x=$('#gqColl');if(x){x.focus();try{x.setSelectionRange(p,p)}catch(_){}}}});
+/* nella scheda azienda: colleghi che la rappresentano */
+const _coColl=companyDetail;companyDetail=function(c){
+  const h=_coColl(c),L=S.colleagues.filter(g=>(g.companyIds||[]).includes(c.id));
+  const sec=`<section class="sec"><header><h3>Colleghi agenti che la rappresentano</h3></header>${L.length?`<div class="cards">${L.map(g=>`<article class="card"><header><h4>${esc(g.name)}</h4><button class="btn sm" data-act="collOpen" data-id="${g.id}">Apri</button></header>${g.zones?`<div class="ln"><i>Zone</i>${esc(g.zones)}</div>`:''}${g.mobile?`<div class="ln"><i>Cell.</i>${telL(g.mobile)}</div>`:''}${g.email?`<div class="ln"><i>Email</i>${mailL(g.email)}</div>`:''}</article>`).join('')}</div>`:'<p class="muted">Nessun collega collegato. Si assegna dalla scheda del collega (Colleghi agenti → Scegli aziende).</p>'}</section>`;
+  const i=h.lastIndexOf('</div>');return h.slice(0,i)+sec+h.slice(i);
+};
+ACT.collOpen=d=>{setView('colleghi');ui.csel=d.id;render()};
+function collDecorate(){
+  const nav=$('#nav');if(nav&&!nav.querySelector('[data-act="navColl"]')){
+    const ref=nav.querySelector('[data-act="navComp"]')||nav.querySelector('[data-v="clienti"]');
+    if(ref)ref.insertAdjacentHTML('afterend',`<button data-act="navColl" ${ui.view==='colleghi'?'aria-current="page"':''}><span>Colleghi agenti</span><span class="n">${S.colleagues.length}</span></button>`);
+  }
+  if(ui.view==='colleghi'){
+    $('#title').textContent='Colleghi agenti';$('#searchBox').innerHTML='';$('#topAct').innerHTML='<button class="btn pri" data-act="collNew">+ Nuovo collega</button>';
+    const w=$('#app'),st=w.scrollTop;w.innerHTML=collView();w.scrollTop=st;
+    nav&&nav.querySelectorAll('[aria-current]').forEach(b=>{if(b.dataset.act!=='navColl')b.removeAttribute('aria-current')});
+  }
+  /* pulsante «→ Colleghi» sui contatti di clienti e aziende */
+  if(ui.view==='clienti'||ui.view==='aziende')document.querySelectorAll('#app [data-act="editContact"]').forEach(b=>{if(b.nextElementSibling&&b.nextElementSibling.dataset.act==='toColleague')return;b.insertAdjacentHTML('afterend',`<button class="btn sm" data-act="toColleague" data-col="${b.dataset.col}" data-id="${b.dataset.id}" data-i="${b.dataset.i}" title="Sposta in Colleghi agenti">→ Colleghi</button>`)});
+  if(ui.view==='clienti'&&ui.sel){const a=document.querySelector('#app .dhead .acts');if(a&&!a.querySelector('[data-act="clientToColleague"]'))a.insertAdjacentHTML('beforeend',`<button class="btn" data-act="clientToColleague" data-id="${ui.sel}">Sposta in Colleghi agenti</button>`)}
+}
+
 /* ---------- più numeri di telefono per clienti e aziende ---------- */
 const PHONES_F={k:'phones',label:'Altri numeri di telefono (uno per riga, es. Magazzino: 0721 123456)',type:'textarea',rows:3,full:true};
 [CLIENT_F,COMPANY_F].forEach(F=>{if(F.some(f=>f.k==='phones'))return;const i=F.findIndex(f=>f.k==='phone');F.splice(i<0?F.length:i+1,0,PHONES_F)});
@@ -4204,6 +4383,7 @@ const _renderOD=render;
 document.head.insertAdjacentHTML('beforeend','<style>.row.inactive{border-left:4px solid var(--bad);background:var(--bad-soft)}.row.inactive b{color:var(--bad)}.dhead.inactive h2{color:var(--bad)}</style>');
 render=function(){
   _renderOD();
+  markTodo();compDecorate();collDecorate();
   document.querySelectorAll('#app .pill.bad').forEach(p=>{if(p.textContent.trim()!=='Inattivo')return;const r=p.closest('.row')||p.closest('.dhead');if(r)r.classList.add('inactive')});
   const n=$('#nav');if(n&&!n.querySelector('[data-act="odMenu"]'))n.insertAdjacentHTML('beforeend','<button data-act="odIdeas"><span>💡 Idee e migliorie</span><span class="n">'+((S.ideas||[]).filter(x=>!x.done).length||'')+'</span></button><button data-act="odMenu"><span>☁ OneDrive e backup</span><span class="n"></span></button>');
   odStatus();
@@ -4221,13 +4401,20 @@ function odGate(kind,extra){
 Object.assign(ACT,{
   odMenu:()=>{
     $('#modal').innerHTML=`<div class="scrim" data-act="closeModal"></div><div class="sheet"><header><h3>OneDrive e backup</h3><button class="x" data-act="closeModal" aria-label="Chiudi">×</button></header>
-    <p class="muted" style="margin:0">Versione app: 26/11/2026 · 3</p><p>I dati sono nella cartella <b>${esc(OD_CFG.folder)}</b> del tuo OneDrive${OD.user?' ('+esc(OD.user)+')':''}. Ogni giorno, alla prima apertura, l'app salva da sola un backup nella sottocartella <b>backup</b> (restano gli ultimi 40).</p>
+    <p class="muted" style="margin:0">Versione app: 26/11/2026 · 7</p><p>I dati sono nella cartella <b>${esc(OD_CFG.folder)}</b> del tuo OneDrive${OD.user?' ('+esc(OD.user)+')':''}. Ogni giorno, alla prima apertura, l'app salva da sola un backup nella sottocartella <b>backup</b> (restano gli ultimi 40).</p>
     <div class="acts" style="flex-wrap:wrap"><button class="btn pri" data-act="odBackupNow">Fai un backup adesso</button><button class="btn" data-act="odBackupDl">Scarica backup sul dispositivo</button><button class="btn" data-act="odSyncNow">Aggiorna dagli altri dispositivi</button></div>
     ${OD.detail?`<p style="color:var(--bad)"><b>Ultimo errore:</b> <span class="mono">${esc(OD.detail)}</span></p>`:''}<h5>Aggiungi dati o ripristina un backup</h5><p class="muted">Carica un file preparato da Claude (es. clienti di un'azienda: si <b>aggiungono</b> ai tuoi dati) oppure un file di backup (<b>sostituisce</b> i dati attuali). In entrambi i casi prima viene fatto un backup automatico.</p>
     <input type="file" accept=".json,application/json" id="odImp"><p id="odImpMsg" class="muted"></p>
     <footer><button class="btn ghost danger" data-act="odLogout">Esci dall'account</button><button class="btn" data-act="closeModal">Chiudi</button></footer></div>`;
     $('#odImp').onchange=async e=>{const f=e.target.files[0];if(!f)return;const m=$('#odImpMsg');
       let j;try{j=JSON.parse(await f.text())}catch(err){m.textContent='File non leggibile';return}
+      if(j&&j.app==='portafoglio-agente'&&j.kind==='merge2'){
+        const P=mergePlan2(j);
+        m.innerHTML=`<b>${esc(j.title||f.name)}</b><br>Aziende: <b>${P.coNew}</b> nuove, <b>${P.coUpd}</b> già presenti<br>Clienti: <b>${P.clNew}</b> nuovi, <b>${P.clUpd}</b> già presenti · ${P.cts} contatti${(j.colleagues||[]).length?'<br>Colleghi agenti: <b>'+j.colleagues.length+'</b>':''}<br>Per chi è già presente completo solo i campi vuoti e aggiungo i contatti mancanti: niente viene cancellato o sovrascritto.<div class="acts" style="margin-top:8px"><button class="btn pri" id="mzGo">Aggiungi i dati</button></div>`;
+        $('#mzGo').onclick=async()=>{const b=$('#mzGo');b.disabled=true;b.textContent='Backup di sicurezza…';try{await odBackup(true)}catch(err){}
+          b.textContent='Importo…';try{await importMerge2(j,P);closeModal();toast((P.coNew+P.coUpd)+' aziende e '+(P.clNew+P.clUpd)+' clienti aggiornati')}catch(err){m.textContent='Importazione non riuscita: '+(err.message||err)}};
+        return;
+      }
       if(j&&j.app==='portafoglio-agente'&&j.kind==='merge'){
         const P=mergePlan(j);
         m.innerHTML=`<b>${esc(j.title||f.name)}</b><br>Azienda: <b>${esc(j.company.name)}</b> ${P.co?'(già presente: completo solo i campi vuoti)':'(nuova)'}<br><b>${P.nNew}</b> clienti nuovi, <b>${P.nUpd}</b> già presenti da aggiornare · ${P.cts} contatti · ${P.rows} righe di listino personalizzato.<br>I dati che hai già non vengono cancellati.<div class="acts" style="margin-top:8px"><button class="btn pri" id="mzGo">Aggiungi i dati</button></div>`;
