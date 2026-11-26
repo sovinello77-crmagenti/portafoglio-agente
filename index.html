@@ -4142,6 +4142,57 @@ async function importBackup(file){
   return {docs:Object.values(j.collections).reduce((s,a)=>s+(a||[]).length,0),photos:ids.length};
 }
 
+
+/* ---------- aggiunta di dati preparati (es. clienti di un'azienda): unisce senza cancellare ---------- */
+const mzN=x=>String(x==null?'':x).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'');
+const mzCo=x=>mzN(x).replace(/(srl|spa|snc|sas|srls)$/,'');
+const mzVat=x=>mzN(x).replace(/^it/,'');
+function mergePlan(j){
+  const co=S.companies.find(c=>mzCo(c.name)===mzCo(j.company.name))||null;
+  const find=o=>(co&&S.clients.find(c=>(c.links||[]).some(l=>l.companyId===co.id&&l.code&&l.code===o.link.code)))
+    ||(o.vat&&S.clients.find(c=>c.vat&&mzVat(c.vat)===mzVat(o.vat)))||S.clients.find(c=>mzN(c.name)===mzN(o.name))||null;
+  const plan=j.clients.map(o=>({o,c:find(o)}));
+  return {co,plan,nNew:plan.filter(x=>!x.c).length,nUpd:plan.filter(x=>x.c).length,rows:j.clients.reduce((s,o)=>s+(o.rows||[]).length,0),cts:j.clients.reduce((s,o)=>s+(o.contacts||[]).length,0)};
+}
+async function importMerge(j,P){
+  let co=P.co;
+  if(!co){co={id:uid(),contacts:[],...j.company};await save('companies',co,true)}
+  else{const u={...co};Object.entries(j.company).forEach(([k,v])=>{if(v&&!u[k])u[k]=v});await save('companies',u,true);co=u}
+  let n=0;
+  for(const {o,c:old} of P.plan){
+    const c=old?{...old,contacts:(old.contacts||[]).map(x=>({...x})),links:(old.links||[]).map(l=>({...l})),sectorIds:[...(old.sectorIds||[])]}:{id:uid(),name:o.name,status:'Attivo',contacts:[],links:[],sectorIds:[]};
+    ['status','address','zip','city','prov','vat','phone','fax','email','pec'].forEach(k=>{if(o[k])c[k]=o[k]});
+    let L=c.links.find(l=>l.companyId===co.id);if(!L){L={companyId:co.id,customs:[],notes:''};c.links.push(L)}
+    Object.entries(o.link||{}).forEach(([k,v])=>{if(v!==''&&v!=null)L[k]=v});
+    for(const k of o.contacts||[]){
+      const e=c.contacts.find(x=>(k.email&&x.email&&x.email.toLowerCase()===k.email.toLowerCase())||(x.name&&k.name&&mzN(x.name)===mzN(k.name)));
+      if(e){Object.entries(k).forEach(([f,v])=>{if(v&&!e[f])e[f]=v})}else c.contacts.push({...k});
+    }
+    await save('clients',c,true);
+    if((o.rows||[]).length){const pl=ensurePl(c.id,co.id);await save('plists',{...pl,rows:o.rows.map(r=>({...r}))},true)}
+    if(++n%25===0)odStatus('Importo clienti: '+n+'/'+P.plan.length);
+  }
+  render();
+}
+
+
+/* ---------- più numeri di telefono per clienti e aziende ---------- */
+const PHONES_F={k:'phones',label:'Altri numeri di telefono (uno per riga, es. Magazzino: 0721 123456)',type:'textarea',rows:3,full:true};
+[CLIENT_F,COMPANY_F].forEach(F=>{if(F.some(f=>f.k==='phones'))return;const i=F.findIndex(f=>f.k==='phone');F.splice(i<0?F.length:i+1,0,PHONES_F)});
+function phonesHtml(t){
+  return String(t||'').split(/\r?\n/).map(x=>x.trim()).filter(Boolean).map(x=>{
+    const m=x.match(/^(.*?)[:\-–]\s*([+\d][\d\s\/.\-]{4,})$/),num=m?m[2]:x,lab=m?m[1].trim():'';
+    return '<div>'+(lab?'<span class="muted">'+esc(lab)+':</span> ':'')+(/\d{5,}/.test(num.replace(/\D/g,''))?telL(num):esc(num))+'</div>'}).join('');
+}
+function withPhones(h,o){
+  if(!o||!String(o.phones||'').trim())return h;
+  const add=kv('Altri telefoni',phonesHtml(o.phones)),main=kv('Telefono',telL(o.phone));
+  if(main&&h.includes(main))return h.replace(main,main+add);
+  return h.replace('<dl class="kv">','<dl class="kv">'+add);
+}
+const _cdPh=clientDetail;clientDetail=function(c){return withPhones(_cdPh(c),c)};
+const _coPh=companyDetail;companyDetail=function(c){return withPhones(_coPh(c),c)};
+
 /* ---------- stato, menu e schermate di accesso ---------- */
 function odStatus(msg){
   const el=$('#mode');if(!el)return;
@@ -4149,8 +4200,11 @@ function odStatus(msg){
   el.innerHTML=esc(t)+(OD.user?`<br><span style="opacity:.8">${esc(OD.user)}</span>`:'');
 }
 const _renderOD=render;
+/* clienti non attivi in rosso, nell'elenco e nella scheda */
+document.head.insertAdjacentHTML('beforeend','<style>.row.inactive{border-left:4px solid var(--bad);background:var(--bad-soft)}.row.inactive b{color:var(--bad)}.dhead.inactive h2{color:var(--bad)}</style>');
 render=function(){
   _renderOD();
+  document.querySelectorAll('#app .pill.bad').forEach(p=>{if(p.textContent.trim()!=='Inattivo')return;const r=p.closest('.row')||p.closest('.dhead');if(r)r.classList.add('inactive')});
   const n=$('#nav');if(n&&!n.querySelector('[data-act="odMenu"]'))n.insertAdjacentHTML('beforeend','<button data-act="odIdeas"><span>💡 Idee e migliorie</span><span class="n">'+((S.ideas||[]).filter(x=>!x.done).length||'')+'</span></button><button data-act="odMenu"><span>☁ OneDrive e backup</span><span class="n"></span></button>');
   odStatus();
 };
@@ -4167,14 +4221,22 @@ function odGate(kind,extra){
 Object.assign(ACT,{
   odMenu:()=>{
     $('#modal').innerHTML=`<div class="scrim" data-act="closeModal"></div><div class="sheet"><header><h3>OneDrive e backup</h3><button class="x" data-act="closeModal" aria-label="Chiudi">×</button></header>
-    <p>I dati sono nella cartella <b>${esc(OD_CFG.folder)}</b> del tuo OneDrive${OD.user?' ('+esc(OD.user)+')':''}. Ogni giorno, alla prima apertura, l'app salva da sola un backup nella sottocartella <b>backup</b> (restano gli ultimi 40).</p>
+    <p class="muted" style="margin:0">Versione app: 26/11/2026 · 3</p><p>I dati sono nella cartella <b>${esc(OD_CFG.folder)}</b> del tuo OneDrive${OD.user?' ('+esc(OD.user)+')':''}. Ogni giorno, alla prima apertura, l'app salva da sola un backup nella sottocartella <b>backup</b> (restano gli ultimi 40).</p>
     <div class="acts" style="flex-wrap:wrap"><button class="btn pri" data-act="odBackupNow">Fai un backup adesso</button><button class="btn" data-act="odBackupDl">Scarica backup sul dispositivo</button><button class="btn" data-act="odSyncNow">Aggiorna dagli altri dispositivi</button></div>
-    ${OD.detail?`<p style="color:var(--bad)"><b>Ultimo errore:</b> <span class="mono">${esc(OD.detail)}</span></p>`:''}<h5>Ripristina o trasferisci dati</h5><p class="muted">Carica un file di backup (anche quello esportato dalla versione in Claude). I dati attuali vengono sostituiti: prima viene fatto un backup automatico.</p>
+    ${OD.detail?`<p style="color:var(--bad)"><b>Ultimo errore:</b> <span class="mono">${esc(OD.detail)}</span></p>`:''}<h5>Aggiungi dati o ripristina un backup</h5><p class="muted">Carica un file preparato da Claude (es. clienti di un'azienda: si <b>aggiungono</b> ai tuoi dati) oppure un file di backup (<b>sostituisce</b> i dati attuali). In entrambi i casi prima viene fatto un backup automatico.</p>
     <input type="file" accept=".json,application/json" id="odImp"><p id="odImpMsg" class="muted"></p>
     <footer><button class="btn ghost danger" data-act="odLogout">Esci dall'account</button><button class="btn" data-act="closeModal">Chiudi</button></footer></div>`;
     $('#odImp').onchange=async e=>{const f=e.target.files[0];if(!f)return;const m=$('#odImpMsg');
+      let j;try{j=JSON.parse(await f.text())}catch(err){m.textContent='File non leggibile';return}
+      if(j&&j.app==='portafoglio-agente'&&j.kind==='merge'){
+        const P=mergePlan(j);
+        m.innerHTML=`<b>${esc(j.title||f.name)}</b><br>Azienda: <b>${esc(j.company.name)}</b> ${P.co?'(già presente: completo solo i campi vuoti)':'(nuova)'}<br><b>${P.nNew}</b> clienti nuovi, <b>${P.nUpd}</b> già presenti da aggiornare · ${P.cts} contatti · ${P.rows} righe di listino personalizzato.<br>I dati che hai già non vengono cancellati.<div class="acts" style="margin-top:8px"><button class="btn pri" id="mzGo">Aggiungi i dati</button></div>`;
+        $('#mzGo').onclick=async()=>{const b=$('#mzGo');b.disabled=true;b.textContent='Backup di sicurezza…';try{await odBackup(true)}catch(err){}
+          b.textContent='Importo…';try{await importMerge(j,P);closeModal();toast(P.nNew+' clienti nuovi, '+P.nUpd+' aggiornati per '+j.company.name)}catch(err){m.textContent='Importazione non riuscita: '+(err.message||err)}};
+        return;
+      }
       if(!confirm('Sostituire tutti i dati attuali con quelli del backup "'+f.name+'"?')){e.target.value='';return}
-      try{m.textContent='Backup di sicurezza…';await odBackup(true);m.textContent='Importo…';const r=await importBackup(f);closeModal();toast('Importati '+r.docs+' elementi e '+r.photos+' foto')}catch(err){m.textContent=err.message||'Importazione non riuscita'}};
+      try{m.textContent='Backup di sicurezza…';await odBackup(true);m.textContent='Importo…';const r=await importBackup(new File([JSON.stringify(j)],f.name));closeModal();toast('Importati '+r.docs+' elementi e '+r.photos+' foto')}catch(err){m.textContent=err.message||'Importazione non riuscita'}};
   },
   odBackupNow:async()=>{try{toast('Backup in corso…');const n=await odBackup(true);toast('Backup salvato in OneDrive: '+n)}catch(e){toast('Backup non riuscito: controlla la connessione')}},
   odBackupDl:async()=>{toast('Preparo il backup…');const blobs={};for(const id of blobIds()){const u=await blobLoad(id);if(u){const b=await (await fetch(u)).blob();blobs[id]={type:b.type,data:await blobToData(b)}}}await DL.save({filename:'portafoglio-backup-'+today()+'.json',data:backupJson(blobs)})},
