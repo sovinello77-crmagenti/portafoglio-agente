@@ -4082,6 +4082,7 @@ save=async function(col,doc,quiet){
   doc._t=Date.now();
   if(col==='clients'&&ui.comp&&ui.view==='clienti'&&!byId('clients',doc.id))doc.competitor=true;
   if(col==='clients'&&!ui.comp&&ui.view==='clienti'&&ui.ctab==='util'&&!byId('clients',doc.id))doc.kind='utilizzatore';
+  if(col==='clients'&&!ui.comp&&ui.view==='clienti'&&ui.ctab==='hotel'&&!byId('clients',doc.id)){doc.kind='hotel';doc.hotelType=doc.hotelType||'Hotel'}
   const i=S[col].findIndex(d=>d.id===doc.id);if(i>=0)S[col][i]=doc;else S[col].push(doc);
   OD.need[col]=true;cacheSave();odSchedule();if(!quiet)render();
 };
@@ -4217,7 +4218,7 @@ async function importMerge2(j,P){
     const ids=new Set(e.sectorIds||[]);for(const s of sectors||[])ids.add(await sec(s));e.sectorIds=[...ids];if(o.competitor)e.competitor=true;
     await save('clients',e,true);if(++n%50===0)odStatus('Importo clienti: '+n+'/'+P.cls.length);
   }
-  render();
+  hotelMigrate();render();
 }
 
 
@@ -4398,9 +4399,9 @@ function collDecorate(){
 
 /* ---------- Clienti: schede «Clienti», «Utilizzatori», «Inattivi» ---------- */
 const isUtil=c=>c&&c.kind==='utilizzatore';
-const cliTab=c=>isUtil(c)?'util':(c.status==='Inattivo'?'inatt':'cli');
+const cliTab=c=>c&&c.kind==='hotel'?'hotel':isUtil(c)?'util':(c.status==='Inattivo'?'inatt':'cli');
 ui.ctab='cli';
-const CTABS=[['cli','Clienti'],['util','Utilizzatori'],['inatt','Inattivi']];
+const CTABS=[['cli','Clienti'],['util','Utilizzatori'],['inatt','Inattivi'],['hotel','Hotel - Ristoranti']];
 function tabsWrap(fn){return function(){
   if(ui.comp)return fn();
   const all=S.clients,cnt=t=>all.filter(c=>!isComp(c)&&cliTab(c)===t).length;
@@ -4438,16 +4439,17 @@ function utilDecorate(){
   if(ui.view!=='clienti'||ui.comp||ui.qid||ui.pl)return;
   if(ui.ctab==='util'){$('#title').textContent='Utilizzatori';const b=$('#topAct .btn.pri');if(b)b.textContent='+ Nuovo utilizzatore'}
   else if(ui.ctab==='inatt')$('#title').textContent='Clienti inattivi';
+  else if(ui.ctab==='hotel'){$('#title').textContent='Hotel - Ristoranti';const b=$('#topAct .btn.pri');if(b)b.textContent='+ Nuovo hotel / ristorante';document.querySelectorAll('#app .row[data-act="sel"]').forEach(r=>{const c=byId('clients',r.dataset.id);if(c&&c.hotelType&&!r.querySelector('.htype')){const b2=r.querySelector('b');b2&&b2.insertAdjacentHTML('afterend',`<span class="htype" style="color:#db2777;font-size:12px">${esc(c.hotelType)}</span>`)}})}
   const c=ui.sel&&byId('clients',ui.sel),a=document.querySelector('#app .dhead .acts');
-  if(c&&a&&!a.querySelector('[data-act="toUtil"]'))a.insertAdjacentHTML('beforeend',`<button class="btn" data-act="toUtil" data-id="${c.id}">${isUtil(c)?'Riporta tra i Clienti':'Sposta in Utilizzatori'}</button><button class="btn" data-act="toInatt" data-id="${c.id}">${c.status==='Inattivo'?'Segna come attivo':'Segna come inattivo'}</button>`);
+  if(c&&a&&!a.querySelector('[data-act="kindOpen"]'))a.insertAdjacentHTML('beforeend',`<button class="btn" data-act="kindOpen" data-id="${c.id}">Categoria: ${esc((KINDS.find(x=>x[0]===(c.kind||''))||KINDS[0])[1])}${c.kind==='hotel'&&c.hotelType?' ('+esc(c.hotelType)+')':''} ▾</button><button class="btn" data-act="toInatt" data-id="${c.id}">${c.status==='Inattivo'?'Segna come attivo':'Segna come inattivo'}</button>`);
 }
 /* marketing: scelta dei destinatari per gruppo e per azienda di interesse */
 const _mkPick=ACT.mkPickRc;
 ACT.mkPickRc=function(){
   _mkPick();
   const pool=[];
-  const grp=c=>isComp(c)?'Concorrenti':isUtil(c)?'Utilizzatori':c.status==='Inattivo'?'Clienti inattivi':'Clienti';
-  const order=['Clienti','Utilizzatori','Clienti inattivi','Concorrenti'];
+  const grp=c=>isComp(c)?'Concorrenti':c.kind==='hotel'?'Hotel - Ristoranti':isUtil(c)?'Utilizzatori':c.status==='Inattivo'?'Clienti inattivi':'Clienti';
+  const order=['Clienti','Utilizzatori','Clienti inattivi','Hotel - Ristoranti','Concorrenti'];
   S.clients.slice().sort((a,b)=>order.indexOf(grp(a))-order.indexOf(grp(b))||a.name.localeCompare(b.name,'it')).forEach(c=>secMails(c).forEach(m=>pool.push({g:grp(c),owner:c.name,name:m.who||c.name,email:m.e,sec:(c.sectorIds||[]),co:[...new Set([...(c.interestIds||[]),...(c.links||[]).map(l=>l.companyId)])]})));
   S.companies.slice().sort((a,b)=>a.name.localeCompare(b.name,'it')).forEach(c=>secMails(c).forEach(m=>pool.push({g:'Aziende',owner:c.name,name:m.who||c.name,email:m.e,sec:[],co:[c.id]})));
   (S.colleagues||[]).forEach(g=>g.email&&pool.push({g:'Colleghi agenti',owner:g.name,name:g.name,email:g.email,sec:[],co:g.companyIds||[]}));
@@ -4503,6 +4505,44 @@ function sedeDecorate(){
   if(c&&a&&!a.querySelector('[data-act="sedeOpen"]'))a.insertAdjacentHTML('beforeend',`<button class="btn" data-act="sedeOpen" data-id="${c.id}">È una sede di…</button>`);
 }
 
+/* ---------- Hotel - Ristoranti e categoria del cliente ---------- */
+const HOTEL_TYPES=['Hotel','Ristorante','Hotel e ristorante','Agriturismo','B&B','Residence','Bar','Stabilimento balneare'];
+const isHotel=c=>c&&c.kind==='hotel';
+const KINDS=[['','Clienti'],['utilizzatore','Utilizzatori'],['hotel','Hotel - Ristoranti']];
+function hotelMigrate(){
+  const hs=S.sectors.filter(s=>/^hotel/i.test(s.name)).map(s=>s.id);if(!hs.length)return;
+  S.clients.filter(c=>c.kind===undefined&&(c.sectorIds||[]).some(id=>hs.includes(id))).forEach(c=>save('clients',{...c,kind:'hotel',hotelType:c.hotelType||'Hotel'},true));
+}
+ACT.kindOpen=d=>{const c=byId('clients',d.id);
+  $('#modal').innerHTML=`<div class="scrim" data-act="closeModal"></div><div class="sheet"><header><h3>Categoria · ${esc(c.name)}</h3><button class="x" data-act="closeModal" aria-label="Chiudi">×</button></header>
+  <div style="display:flex;flex-direction:column;gap:6px">${KINDS.map(([k,l])=>`<label style="display:flex;gap:8px;align-items:center"><input type="radio" name="kd" value="${k}" ${(c.kind||'')===k?'checked':''}> ${l}</label>`).join('')}</div>
+  <label class="fld" id="kdT" style="margin-top:6px"><span>Tipo di struttura (per Hotel - Ristoranti)</span><input id="kdType" list="kdTypes" value="${esc(c.hotelType||'')}" placeholder="es. Hotel, Ristorante, Agriturismo…"><datalist id="kdTypes">${HOTEL_TYPES.map(x=>`<option value="${esc(x)}">`).join('')}</datalist></label>
+  <footer><button class="btn ghost" data-act="closeModal">Annulla</button><button class="btn pri" id="kdOk">Salva</button></footer></div>`;
+  const upd=()=>{$('#kdT').style.display=document.querySelector('[name=kd]:checked').value==='hotel'?'':'none'};
+  document.querySelectorAll('[name=kd]').forEach(r=>r.onchange=upd);upd();
+  $('#kdOk').onclick=async()=>{const k=document.querySelector('[name=kd]:checked').value,t=$('#kdType').value.trim();closeModal();
+    await save('clients',{...c,kind:k,hotelType:k==='hotel'?(t||'Hotel'):(c.hotelType||'')},true);ui.sel=null;render();toast(c.name+' → '+KINDS.find(x=>x[0]===k)[1])};
+};
+/* ---------- mappa: scritte nere nei riquadri e categorie dei clienti ---------- */
+document.head.insertAdjacentHTML('beforeend','<style>.mpop{background:#fff!important;color:#111!important}.mpop *{color:#111!important}.mpop a{text-decoration:underline}.mpop .btn{background:#fff!important;border:1px solid #c9d1d4!important}.mpop .btn.pri{background:#55b6bd!important;border-color:#55b6bd!important}.mapcat-sub{margin-left:20px}</style>');
+Object.keys(MAPCAT).forEach(k=>delete MAPCAT[k]);
+Object.assign(MAPCAT,{cli:{label:'Attivi',color:'#0f766e'},inatt:{label:'Inattivi',color:'#dc2626'},util:{label:'Utilizzatori',color:'#2563eb'},pot:{label:'Possibili contatti',color:'#d97706'},hotel:{label:'Hotel - Ristoranti',color:'#db2777'},comp:{label:'Concorrenti',color:'#6b7280'},az:{label:'Aziende mandanti',color:'#7c3aed'}});
+Object.assign(MAP.cat,{cli:true,inatt:true,util:true,pot:true,hotel:true,comp:false,az:true});
+const mapCat2=(col,d)=>col==='companies'?'az':isComp(d)?'comp':isHotel(d)?'hotel':isUtil(d)?'util':d.status==='Inattivo'?'inatt':d.status==='Potenziale'?'pot':'cli';
+mapItems=function(){
+  const L=[];
+  S.clients.forEach(c=>L.push({col:'clients',id:c.id,cat:mapCat2('clients',c),d:c,name:c.name}));
+  S.companies.forEach(c=>L.push({col:'companies',id:c.id,cat:'az',d:c,name:c.name}));
+  return L.map(x=>({...x,has:isFinite(parseFloat(x.d.lat))&&isFinite(parseFloat(x.d.lng)),lat:parseFloat(x.d.lat),lng:parseFloat(x.d.lng)}));
+};
+function mapDecorate(){
+  if(ui.view!=='mappa')return;
+  const first=document.querySelector('#app [data-mapcat="cli"]');if(!first||document.querySelector('#app .mapcat-head'))return;
+  const lab=k=>{const i=document.querySelector(`#app [data-mapcat="${k}"]`);return i&&i.closest('label')};
+  ['cli','inatt','util','pot'].forEach(k=>{const l=lab(k);if(l)l.classList.add('mapcat-sub')});
+  lab('cli').insertAdjacentHTML('beforebegin','<div class="mapcat-head" style="font-weight:600;padding:3px 0">Clienti</div>');
+}
+
 /* ---------- più numeri di telefono per clienti e aziende ---------- */
 const PHONES_F={k:'phones',label:'Altri numeri di telefono (uno per riga, es. Magazzino: 0721 123456)',type:'textarea',rows:3,full:true};
 [CLIENT_F,COMPANY_F].forEach(F=>{if(F.some(f=>f.k==='phones'))return;const i=F.findIndex(f=>f.k==='phone');F.splice(i<0?F.length:i+1,0,PHONES_F)});
@@ -4531,7 +4571,7 @@ const _renderOD=render;
 document.head.insertAdjacentHTML('beforeend','<style>.row.inactive{border-left:4px solid var(--bad);background:var(--bad-soft)}.row.inactive b{color:var(--bad)}.dhead.inactive h2{color:var(--bad)}</style>');
 render=function(){
   _renderOD();
-  markTodo();compDecorate();collDecorate();utilDecorate();sedeDecorate();
+  markTodo();compDecorate();collDecorate();utilDecorate();sedeDecorate();mapDecorate();
   if(ui.view==='aziende'){const sp=document.querySelector('#app .split.h');if(sp)sp.classList.remove('h')}
   navOrder();
   document.querySelectorAll('#app .pill.bad').forEach(p=>{if(p.textContent.trim()!=='Inattivo')return;const r=p.closest('.row')||p.closest('.dhead');if(r)r.classList.add('inactive')});
@@ -4551,7 +4591,7 @@ function odGate(kind,extra){
 Object.assign(ACT,{
   odMenu:()=>{
     $('#modal').innerHTML=`<div class="scrim" data-act="closeModal"></div><div class="sheet"><header><h3>OneDrive e backup</h3><button class="x" data-act="closeModal" aria-label="Chiudi">×</button></header>
-    <p class="muted" style="margin:0">Versione app: 27/11/2026 · 10</p><p>I dati sono nella cartella <b>${esc(OD_CFG.folder)}</b> del tuo OneDrive${OD.user?' ('+esc(OD.user)+')':''}. Ogni giorno, alla prima apertura, l'app salva da sola un backup nella sottocartella <b>backup</b> (restano gli ultimi 40).</p>
+    <p class="muted" style="margin:0">Versione app: 27/11/2026 · 11</p><p>I dati sono nella cartella <b>${esc(OD_CFG.folder)}</b> del tuo OneDrive${OD.user?' ('+esc(OD.user)+')':''}. Ogni giorno, alla prima apertura, l'app salva da sola un backup nella sottocartella <b>backup</b> (restano gli ultimi 40).</p>
     <div class="acts" style="flex-wrap:wrap"><button class="btn pri" data-act="odBackupNow">Fai un backup adesso</button><button class="btn" data-act="odBackupDl">Scarica backup sul dispositivo</button><button class="btn" data-act="odSyncNow">Aggiorna dagli altri dispositivi</button></div>
     ${OD.detail?`<p style="color:var(--bad)"><b>Ultimo errore:</b> <span class="mono">${esc(OD.detail)}</span></p>`:''}<h5>Aggiungi dati o ripristina un backup</h5><p class="muted">Carica un file preparato da Claude (es. clienti di un'azienda: si <b>aggiungono</b> ai tuoi dati) oppure un file di backup (<b>sostituisce</b> i dati attuali). In entrambi i casi prima viene fatto un backup automatico.</p>
     <input type="file" accept=".json,application/json" id="odImp"><p id="odImpMsg" class="muted"></p>
@@ -4619,7 +4659,7 @@ init=async function(){
   try{
     const r=await gfetch('/me/drive?$select=owner');if(r.ok){const j=await r.json();OD.user=((j.owner||{}).user||{}).displayName||''}
     await odEnsureFolders();
-    await Promise.all(COLS.map(pullCol));OD.ready=true;await cacheSave();render();
+    await Promise.all(COLS.map(pullCol));OD.ready=true;hotelMigrate();await cacheSave();render();
     if(pending())odFlush();
     odDailyBackup();
   }catch(e){
