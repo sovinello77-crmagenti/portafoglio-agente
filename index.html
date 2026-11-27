@@ -4080,6 +4080,7 @@ async function odPoll(){
 /* ---------- sostituti delle funzioni dell'archivio di Claude ---------- */
 save=async function(col,doc,quiet){
   doc._t=Date.now();
+  ['logo','photo'].forEach(k=>{if(typeof Blob!=='undefined'&&doc[k] instanceof Blob)delete doc[k]});
   if(col==='clients'&&ui.comp&&ui.view==='clienti'&&!byId('clients',doc.id))doc.competitor=true;
   if(col==='clients'&&!ui.comp&&ui.view==='clienti'&&ui.ctab==='util'&&!byId('clients',doc.id))doc.kind='utilizzatore';
   if(col==='clients'&&!ui.comp&&ui.view==='clienti'&&ui.ctab==='hotel'&&!byId('clients',doc.id)){doc.kind='hotel';doc.hotelType=doc.hotelType||'Hotel'}
@@ -4543,6 +4544,54 @@ function mapDecorate(){
   lab('cli').insertAdjacentHTML('beforebegin','<div class="mapcat-head" style="font-weight:600;padding:3px 0">Clienti</div>');
 }
 
+/* ---------- immagini nei moduli: foto dalla fotocamera e copia-incolla ---------- */
+function imgSet(inp,file){
+  if(!file)return;
+  const f=file instanceof File?file:new File([file],'immagine.'+((file.type||'image/png').split('/')[1]||'png'),{type:file.type||'image/png'});
+  try{const dt=new DataTransfer();dt.items.add(f);inp.files=dt.files}catch(e){inp._file=f}
+  inp._file=f;
+  const wrap=inp.closest('.fld');let pv=wrap.querySelector('img.thumb-prev');
+  if(!pv){pv=document.createElement('img');pv.className='thumb-prev';pv.alt='';wrap.appendChild(pv)}
+  pv.src=URL.createObjectURL(f);
+  const msg=wrap.querySelector('.imgmsg');if(msg)msg.textContent='Immagine pronta: premi Salva';
+}
+const _openFormImg=openForm;
+openForm=function(title,fields,vals,onSave,note){
+  /* i file presi da incolla/fotocamera arrivano al salvataggio anche dove DataTransfer non c'è */
+  const save2=async o=>{for(const f of fields){if(f.type==='image'&&!o[f.k]){const el=$('#f_'+f.k);if(el&&el._file)o[f.k]=el._file}}return onSave(o)};
+  _openFormImg(title,fields,vals,save2,note);
+  const form=$('#theForm');if(!form)return;
+  form.querySelectorAll('input[type="file"][accept="image/*"]').forEach(inp=>{
+    const id=inp.id;
+    inp.insertAdjacentHTML('afterend',`<div class="acts" style="margin-top:4px"><label class="btn sm" style="cursor:pointer">📷 Scatta foto<input type="file" accept="image/*" capture="environment" data-camfor="${id}" style="display:none"></label><button type="button" class="btn sm" data-pastefor="${id}">📋 Incolla immagine</button></div><span class="muted imgmsg" style="font-size:12px">Puoi anche copiare un logo (da un sito, da una mail o con uno screenshot) e premere Ctrl+V qui.</span>`);
+    inp.addEventListener('change',()=>{if(inp.files[0])imgSet(inp,inp.files[0])});
+  });
+  form.querySelectorAll('[data-camfor]').forEach(c=>c.addEventListener('change',()=>{if(c.files[0])imgSet($('#'+c.dataset.camfor),c.files[0])}));
+  form.querySelectorAll('[data-pastefor]').forEach(b=>b.addEventListener('click',async()=>{
+    const inp=$('#'+b.dataset.pastefor);
+    try{const items=await navigator.clipboard.read();for(const it of items){const t=it.types.find(x=>x.startsWith('image/'));if(t){imgSet(inp,await it.getType(t));return}}toast('Negli appunti non c\'è un\'immagine: copia prima il logo')}
+    catch(e){toast('Premi Ctrl+V (su telefono: tieni premuto e scegli Incolla) per incollare l\'immagine')}
+  }));
+  form.addEventListener('paste',e=>{
+    const items=[...((e.clipboardData||{}).items||[])],it=items.find(x=>x.type&&x.type.startsWith('image/'));if(!it)return;
+    const inp=(document.activeElement&&document.activeElement.type==='file'&&document.activeElement)||form.querySelector('input[type="file"][accept="image/*"]');if(!inp)return;
+    e.preventDefault();imgSet(inp,it.getAsFile());
+  });
+};
+/* ---------- logo anche per i clienti ---------- */
+if(!CLIENT_F.some(f=>f.k==='logo')){
+  CLIENT_F.push({k:'logo',label:'Logo del cliente',type:'image',full:true},{k:'rmLogo',label:'Logo',type:'select',opts:[['','Mantieni quello attuale'],['1','Rimuovi il logo']],full:true});
+}
+Object.assign(ACT,{
+  newClient:()=>openForm('Nuovo cliente',CLIENT_F,{status:'Attivo'},async o=>{const c=await withLogo({id:uid(),contacts:[],links:[]},o);await save('clients',c,true);ui.view='clienti';ui.sel=c.id;ui.q='';render()}),
+  editClient:d=>{const c=byId('clients',d.id);openForm('Modifica cliente',CLIENT_F,{...c,rmLogo:'',_img:logoSrc(c)},async o=>save('clients',await withLogo(c,o)))}
+});
+/* logo nell'intestazione della scheda di clienti e aziende */
+function logoHead(h,o){const src=logoSrc(o);if(!src||h.includes('class="dlogo"'))return h;
+  return h.replace('<div class="dhead"><div class="t">',`<div class="dhead"><img class="dlogo" src="${esc(src)}" alt="Logo" style="max-height:56px;max-width:140px;object-fit:contain;background:#fff;border-radius:6px;padding:4px"><div class="t" style="flex:1">`)}
+const _cdLogo=clientDetail;clientDetail=function(c){return logoHead(_cdLogo(c),c)};
+const _coLogo=companyDetail;companyDetail=function(c){return logoHead(_coLogo(c),c)};
+
 /* ---------- più numeri di telefono per clienti e aziende ---------- */
 const PHONES_F={k:'phones',label:'Altri numeri di telefono (uno per riga, es. Magazzino: 0721 123456)',type:'textarea',rows:3,full:true};
 [CLIENT_F,COMPANY_F].forEach(F=>{if(F.some(f=>f.k==='phones'))return;const i=F.findIndex(f=>f.k==='phone');F.splice(i<0?F.length:i+1,0,PHONES_F)});
@@ -4591,7 +4640,7 @@ function odGate(kind,extra){
 Object.assign(ACT,{
   odMenu:()=>{
     $('#modal').innerHTML=`<div class="scrim" data-act="closeModal"></div><div class="sheet"><header><h3>OneDrive e backup</h3><button class="x" data-act="closeModal" aria-label="Chiudi">×</button></header>
-    <p class="muted" style="margin:0">Versione app: 27/11/2026 · 11</p><p>I dati sono nella cartella <b>${esc(OD_CFG.folder)}</b> del tuo OneDrive${OD.user?' ('+esc(OD.user)+')':''}. Ogni giorno, alla prima apertura, l'app salva da sola un backup nella sottocartella <b>backup</b> (restano gli ultimi 40).</p>
+    <p class="muted" style="margin:0">Versione app: 27/11/2026 · 12</p><p>I dati sono nella cartella <b>${esc(OD_CFG.folder)}</b> del tuo OneDrive${OD.user?' ('+esc(OD.user)+')':''}. Ogni giorno, alla prima apertura, l'app salva da sola un backup nella sottocartella <b>backup</b> (restano gli ultimi 40).</p>
     <div class="acts" style="flex-wrap:wrap"><button class="btn pri" data-act="odBackupNow">Fai un backup adesso</button><button class="btn" data-act="odBackupDl">Scarica backup sul dispositivo</button><button class="btn" data-act="odSyncNow">Aggiorna dagli altri dispositivi</button></div>
     ${OD.detail?`<p style="color:var(--bad)"><b>Ultimo errore:</b> <span class="mono">${esc(OD.detail)}</span></p>`:''}<h5>Aggiungi dati o ripristina un backup</h5><p class="muted">Carica un file preparato da Claude (es. clienti di un'azienda: si <b>aggiungono</b> ai tuoi dati) oppure un file di backup (<b>sostituisce</b> i dati attuali). In entrambi i casi prima viene fatto un backup automatico.</p>
     <input type="file" accept=".json,application/json" id="odImp"><p id="odImpMsg" class="muted"></p>
