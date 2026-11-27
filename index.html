@@ -4463,6 +4463,46 @@ ACT.mkPickRc=function(){
   MKF.draw=draw;$('#mkRq').oninput=draw;$('#mkRs').onchange=draw;$('#mkRg').onchange=draw;$('#mkRco').onchange=draw;draw();
 };
 
+/* ---------- assegna un cliente come sede distaccata di un altro ---------- */
+function sedePick(b){
+  const draw=()=>{const q=mzN($('#sdQ').value),L=S.clients.filter(c=>c.id!==b.id&&!isComp(c)&&(!q||mzN([c.name,c.city,c.vat].join(' ')).includes(q))).sort((x,y)=>x.name.localeCompare(y.name,'it')).slice(0,60);
+    $('#sdL').innerHTML=L.map(c=>`<button type="button" class="row" data-act="sedeGo" data-id="${c.id}" data-bid="${b.id}" style="width:100%;margin-bottom:4px"><b>${esc(c.name)}</b><span>${esc([c.address,c.city,c.prov].filter(Boolean).join(', '))}${(c.sites||[]).length?' · '+c.sites.length+' sedi':''}</span></button>`).join('')||'<p class="muted">Nessun cliente trovato.</p>'};
+  const first=String(b.name).split(/\s+/).filter(w=>w.length>1)[0]||'';
+  $('#modal').innerHTML=`<div class="scrim" data-act="closeModal"></div><div class="sheet"><header><h3>Assegna come sede distaccata</h3><button class="x" data-act="closeModal" aria-label="Chiudi">×</button></header>
+  <p><b>${esc(b.name)}</b><br><span class="muted">${esc([b.address,b.zip,b.city,b.prov].filter(Boolean).join(' '))}</span></p>
+  <p class="muted">Cerca e scegli la <b>sede principale</b>: indirizzo, telefoni e contatti di questa scheda diventano una sua sede, con i contatti collegati.</p>
+  <input id="sdQ" type="search" placeholder="Cerca la sede principale…" value="${esc(first)}" style="width:100%"><div id="sdL" style="max-height:50vh;overflow:auto;margin-top:8px"></div>
+  <footer><button class="btn ghost" data-act="closeModal">Annulla</button></footer></div>`;
+  $('#sdQ').oninput=draw;draw();$('#sdQ').focus();
+}
+async function sedeAssign(mainId,branchId){
+  const m0=byId('clients',mainId),b=byId('clients',branchId);if(!m0||!b)return;
+  const m={...m0,sites:(m0.sites||[]).map(x=>({...x})),contacts:(m0.contacts||[]).map(x=>({...x})),sectorIds:[...(m0.sectorIds||[])]};
+  const codes=(b.links||[]).filter(l=>l.code).map(l=>{const co=byId('companies',l.companyId);return 'Cod. cliente '+(co?co.name:'')+': '+l.code});
+  const site={id:uid(),name:b.city?(b.city+(b.address?' – '+b.address:'')):b.name,address:b.address||'',zip:b.zip||'',city:b.city||'',prov:b.prov||'',phone:b.phone||'',email:b.email||'',
+    notes:[b.name!==m.name?'Ex scheda: '+b.name:'',b.phones?'Altri tel.: '+String(b.phones).split(/\n/).join(', '):'',b.fax?'Fax: '+b.fax:'',...codes,b.notes||''].filter(Boolean).join('\n')};
+  m.sites.push(site);
+  (b.contacts||[]).forEach(k=>{if(!m.contacts.some(x=>(k.email&&x.email&&x.email.toLowerCase()===k.email.toLowerCase())||(k.name&&x.name&&mzN(k.name)===mzN(x.name)&&k.phone===x.phone)))m.contacts.push({...k,siteId:site.id})});
+  (b.sectorIds||[]).forEach(id=>{if(!m.sectorIds.includes(id))m.sectorIds.push(id)});
+  /* condizioni della sede che la principale non ha: si portano dietro */
+  const links=(m0.links||[]).map(l=>({...l}));
+  (b.links||[]).forEach(l=>{if(!links.some(x=>x.companyId===l.companyId))links.push({...l})});m.links=links;
+  for(const P of S.plists.filter(P=>P.clientId===b.id)){if(!getPl(m.id,P.companyId))await save('plists',{...P,id:plId(m.id,P.companyId),clientId:m.id},true);await remove('plists',P.id,true)}
+  for(const q of S.quotes.filter(q=>q.clientId===b.id))await save('quotes',{...q,clientId:m.id,clientName:m.name,siteId:site.id},true);
+  await save('clients',m,true);await remove('clients',b.id,true);
+  ui.sel=m.id;render();toast(b.name+' ora è una sede di '+m.name);
+}
+Object.assign(ACT,{
+  sedeOpen:d=>sedePick(byId('clients',d.id)),
+  sedeGo:d=>{const m=byId('clients',d.id),b=byId('clients',d.bid);
+    confirmBox(`Trasformare <b>${esc(b.name)}</b> in una sede di <b>${esc(m.name)}</b>?<br><span class="muted">La scheda di ${esc(b.name)} viene tolta dall'elenco clienti: indirizzo, telefoni e contatti passano nella sede; codici cliente e condizioni restano (nelle note della sede o nella principale, se non le ha); preventivi e ordini passano alla principale con questa sede di consegna.</span>`,()=>sedeAssign(m.id,b.id),'Assegna sede')}
+});
+function sedeDecorate(){
+  if(ui.view!=='clienti'||ui.qid||ui.pl||!ui.sel)return;
+  const a=document.querySelector('#app .dhead .acts'),c=byId('clients',ui.sel);
+  if(c&&a&&!a.querySelector('[data-act="sedeOpen"]'))a.insertAdjacentHTML('beforeend',`<button class="btn" data-act="sedeOpen" data-id="${c.id}">È una sede di…</button>`);
+}
+
 /* ---------- più numeri di telefono per clienti e aziende ---------- */
 const PHONES_F={k:'phones',label:'Altri numeri di telefono (uno per riga, es. Magazzino: 0721 123456)',type:'textarea',rows:3,full:true};
 [CLIENT_F,COMPANY_F].forEach(F=>{if(F.some(f=>f.k==='phones'))return;const i=F.findIndex(f=>f.k==='phone');F.splice(i<0?F.length:i+1,0,PHONES_F)});
@@ -4491,7 +4531,7 @@ const _renderOD=render;
 document.head.insertAdjacentHTML('beforeend','<style>.row.inactive{border-left:4px solid var(--bad);background:var(--bad-soft)}.row.inactive b{color:var(--bad)}.dhead.inactive h2{color:var(--bad)}</style>');
 render=function(){
   _renderOD();
-  markTodo();compDecorate();collDecorate();utilDecorate();
+  markTodo();compDecorate();collDecorate();utilDecorate();sedeDecorate();
   if(ui.view==='aziende'){const sp=document.querySelector('#app .split.h');if(sp)sp.classList.remove('h')}
   navOrder();
   document.querySelectorAll('#app .pill.bad').forEach(p=>{if(p.textContent.trim()!=='Inattivo')return;const r=p.closest('.row')||p.closest('.dhead');if(r)r.classList.add('inactive')});
@@ -4511,7 +4551,7 @@ function odGate(kind,extra){
 Object.assign(ACT,{
   odMenu:()=>{
     $('#modal').innerHTML=`<div class="scrim" data-act="closeModal"></div><div class="sheet"><header><h3>OneDrive e backup</h3><button class="x" data-act="closeModal" aria-label="Chiudi">×</button></header>
-    <p class="muted" style="margin:0">Versione app: 26/11/2026 · 9</p><p>I dati sono nella cartella <b>${esc(OD_CFG.folder)}</b> del tuo OneDrive${OD.user?' ('+esc(OD.user)+')':''}. Ogni giorno, alla prima apertura, l'app salva da sola un backup nella sottocartella <b>backup</b> (restano gli ultimi 40).</p>
+    <p class="muted" style="margin:0">Versione app: 27/11/2026 · 10</p><p>I dati sono nella cartella <b>${esc(OD_CFG.folder)}</b> del tuo OneDrive${OD.user?' ('+esc(OD.user)+')':''}. Ogni giorno, alla prima apertura, l'app salva da sola un backup nella sottocartella <b>backup</b> (restano gli ultimi 40).</p>
     <div class="acts" style="flex-wrap:wrap"><button class="btn pri" data-act="odBackupNow">Fai un backup adesso</button><button class="btn" data-act="odBackupDl">Scarica backup sul dispositivo</button><button class="btn" data-act="odSyncNow">Aggiorna dagli altri dispositivi</button></div>
     ${OD.detail?`<p style="color:var(--bad)"><b>Ultimo errore:</b> <span class="mono">${esc(OD.detail)}</span></p>`:''}<h5>Aggiungi dati o ripristina un backup</h5><p class="muted">Carica un file preparato da Claude (es. clienti di un'azienda: si <b>aggiungono</b> ai tuoi dati) oppure un file di backup (<b>sostituisce</b> i dati attuali). In entrambi i casi prima viene fatto un backup automatico.</p>
     <input type="file" accept=".json,application/json" id="odImp"><p id="odImpMsg" class="muted"></p>
