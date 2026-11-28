@@ -4638,7 +4638,7 @@ function mqAuto(r){
   if(m==='completo'){code=C?'6918000'+sz:r.tip==='B'?'6918003':r.tip==='A'?'6918002':'';size=C?sz:''}
   else if(m==='predisp'){code=C?({'':'5500082',L:'5500083',XL:'5500084',XXL:'5500085'})[sz]:(r.tip?'5500080':'')}
   else code=C?'5010420':r.tip==='B'?'5010423':r.tip==='A'?'5010422':'';
-  let base=ANT.kit[code]||0;if(m!=='predisp'&&num(r.z)>0&&base)base+=ANT.tele;
+  let base=ANT.kit[code]||0;if(m!=='predisp'&&mqLT(r)&&base)base+=mqTeleAmt(MQ()||{});
   return {code:code&&(tel&&m==='completo'?code+'T':code),p1:base,p2:base&&m!=='predisp'?base+ANT.radio:base};
 }
 function mqWarn(r){
@@ -4658,11 +4658,15 @@ const mqPrice=(q,r,v)=>num(v===2?r.p2:r.p1);
 const mqSub=(q,v)=>r2((q.rows||[]).reduce((s,r)=>s+num(r.qty)*mqPrice(q,r,v),0));
 /* trasporto: solo indicativo, NON entra nel totale */
 const mqTraspTxt=q=>q.shipAmt==null||q.shipAmt===''?(q.trasp||''):'Trasporto indicativo €. '+String(q.shipAmt).replace('.',',')+' '+(q.shipUnit==null?'a motore':q.shipUnit)+' + Iva';
+/* leva telescopica: automatica per tipologia C con luce sotto 800 mm, si può attivare o togliere su ogni riga */
+const mqLTauto=r=>r.t==='m'&&r.tip==='C'&&mqW(r)>0&&mqW(r)<800;
+const mqLT=r=>r.t==='m'&&r.model!=='predisp'&&(r.lt==null?mqLTauto(r):!!r.lt);
+const mqTeleAmt=q=>q&&q.teleAmt!=null&&q.teleAmt!==''?num(q.teleAmt):ANT.tele;
 const MQ_SN={shipNote:'TRASPORTO INDICATIVO NON CONTEGGIATO SUL TOTALE',snColor:'#c00000',snFont:'Arial',snSize:15};
 const mqSN=q=>({text:q.shipNote==null?MQ_SN.shipNote:q.shipNote,color:q.snColor||MQ_SN.snColor,font:q.snFont||MQ_SN.snFont,size:num(q.snSize)||MQ_SN.snSize});
 const MQ_FONTS=['Arial','Calibri','Verdana','Tahoma','Times New Roman','Georgia','Courier New'];
 const mqTot=(q,v)=>mqSub(q,v);
-const mqModelTxt=r=>r.t!=='m'?'':'SERIE4'+(r.model==='predisp'?' predisp.':r.model==='motor'?' motoriz.':'')+(num(r.z)>0&&r.model!=='predisp'?' + leva tel.':'');
+const mqModelTxt=r=>r.t!=='m'?'':'SERIE4'+(r.model==='predisp'?' predisp.':r.model==='motor'?' motoriz.':'')+(mqLT(r)?' + leva tel.':'');
 const mqVersions=q=>q.kind==='ordine'?[q.version==='radio'?2:1]:[1,2];
 const mqVLabel=v=>v===2?'Versione PREDISPOSTO RADIO - (i telecomandi sono a parte, vedi sotto)':'VERSIONE SENZA PREDISPOSIZIONE RADIO';
 
@@ -4694,13 +4698,13 @@ function mqRowHtml(q,r,i,n){
   const tots=vs.map(v=>`<td class="num" id="mqT${v}_${i}"><b>${eur(num(r.qty)*mqPrice(q,r,v))}</b></td>`).join('');
   const prs=vs.map(v=>`<td class="num">${pr(v)}</td>`).join('');
   const del=`<td><button class="x" data-act="mqDelRow" data-i="${i}" aria-label="Elimina riga">×</button></td>`;
-  if(r.t==='d')return `<tr><td class="num muted">·</td><td colspan="11"><input data-mqf="desc" data-i="${i}" value="${esc(r.desc||'')}" placeholder="Descrizione (es. Leva per ante legate per kit a vista – versione corta, ante da 40 a 60 cm)" style="width:100%"></td><td>${inp('code',96)}</td><td>${inp('qty',50,'n')}</td>${prs}${tots}${del}</tr>`;
+  if(r.t==='d')return `<tr><td class="num muted">·</td><td colspan="12"><input data-mqf="desc" data-i="${i}" value="${esc(r.desc||'')}" placeholder="Descrizione (es. Leva per ante legate per kit a vista – versione corta, ante da 40 a 60 cm)" style="width:100%"></td><td>${inp('code',96)}</td><td>${inp('qty',50,'n')}</td>${prs}${tots}${del}</tr>`;
   const w=mqWarn(r);
   return `<tr><td class="num"><b>${n}</b></td><td><select data-mqf="tip" data-i="${i}" style="width:62px">${['','A','B','C'].map(t=>`<option value="${t}" ${r.tip===t?'selected':''} title="${esc(TIP[t]||'')}">${t||'—'}</option>`).join('')}</select></td>
   <td>${inp('lf',54,'n')}</td><td>${inp('lp',54,'n')}</td><td>${inp('tt',42,'n')}</td><td>${inp('hh',54,'n')}</td><td>${inp('peso',42,'n')}</td><td>${inp('p',42,'n')}</td><td>${inp('z',42,'n')}</td><td>${inp('y',42,'n')}</td><td>${inp('s',42,'n')}</td>
   <td><select data-mqf="model" data-i="${i}" style="width:112px">${Object.entries(MODELS).map(([k,l])=>`<option value="${k}" ${r.model===k?'selected':''}>${l}</option>`).join('')}</select></td>
-  <td><input data-mqf="code" data-i="${i}" id="mqC_${i}" value="${esc(r.code||'')}" style="width:96px;${r.codeM?'background:var(--warn-soft)':''}" title="${r.codeM?'Codice scritto a mano':'Codice automatico'}"></td><td>${inp('qty',50,'n')}</td>${prs}${tots}${del}</tr>
-  <tr class="mqw" id="mqW_${i}"><td></td><td colspan="${14+vs.length*2}" style="padding-top:0;border-top:0">${w.length?`<span style="color:var(--bad);font-size:12px">⚠ ${esc(w.join(' · '))}</span>`:''}</td></tr>`;
+  <td style="text-align:center"><input type="checkbox" data-mqlt="${i}" ${mqLT(r)?'checked':''} ${r.model==='predisp'?'disabled':''} title="${r.lt==null?'Automatico (doppia anta sotto 800 mm)':'Scelto a mano'}" style="width:18px;height:18px;${r.lt!=null?'outline:2px solid var(--warn)':''}"></td><td><input data-mqf="code" data-i="${i}" id="mqC_${i}" value="${esc(r.code||'')}" style="width:96px;${r.codeM?'background:var(--warn-soft)':''}" title="${r.codeM?'Codice scritto a mano':'Codice automatico'}"></td><td>${inp('qty',50,'n')}</td>${prs}${tots}${del}</tr>
+  <tr class="mqw" id="mqW_${i}"><td></td><td colspan="${15+vs.length*2}" style="padding-top:0;border-top:0">${w.length?`<span style="color:var(--bad);font-size:12px">⚠ ${esc(w.join(' · '))}</span>`:''}</td></tr>`;
 }
 function mqEditor(q){
   const cl=mqClient(q),co=byId('companies',q.companyId),vs=mqVersions(q),hv=mqHeadVals(q),T=MQT[q.tpl];
@@ -4725,19 +4729,54 @@ function mqEditor(q){
     <button class="btn sm pri" data-act="mqAddRow">+ Riga misure</button><button class="btn sm" data-act="mqAddDesc">+ Riga descrittiva</button><button class="btn sm" data-act="mqAcc">+ Accessorio (con foto)</button>
     <span style="display:inline-flex;gap:4px"><input id="mqCode" placeholder="Aggiungi per codice" style="width:150px"><button class="btn sm" data-act="mqAddCode">Aggiungi</button></span></div></header>
    <p class="muted" style="margin:0">Scrivi tipologia e misure: modello, codice e prezzo si compilano da soli. Prezzo e codice si possono sempre correggere a mano (diventano gialli). Misure in mm; peso totale delle ante in kg.</p>
-   <div class="tw"><table class="mqt" style="min-width:1100px"><thead><tr><th>#</th><th title="A mono anta destro · B mono anta sinistro · C doppia anta">Tip.</th><th>LF luce foro</th><th>LP luce pass.</th><th>T telaio</th><th>H altezza</th><th>Peso ante kg</th><th>P prof.</th><th>Z bandella</th><th>Y lamelle</th><th>S spess.</th><th>Modello</th><th>Codice</th><th>Q.tà</th>${vh}<th></th></tr></thead><tbody id="mqRows">${rows}</tbody></table></div>
+   <div class="tw"><table class="mqt" style="min-width:1100px"><thead><tr><th>#</th><th title="A mono anta destro · B mono anta sinistro · C doppia anta">Tip.</th><th>LF luce foro</th><th>LP luce pass.</th><th>T telaio</th><th>H altezza</th><th>Peso ante kg</th><th>P prof.</th><th>Z bandella</th><th>Y lamelle</th><th>S spess.</th><th>Modello</th><th title="Sovrapprezzo leva telescopica">Leva tel.</th><th>Codice</th><th>Q.tà</th>${vh}<th></th></tr></thead><tbody id="mqRows">${rows}</tbody></table></div>
    <div style="display:flex;gap:20px;flex-wrap:wrap;justify-content:space-between;align-items:flex-start">
     <div class="card" style="min-width:300px;max-width:520px"><b>Trasporto indicativo</b><span class="muted" style="font-size:12px">Non viene conteggiato nel totale.</span>
      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">Trasporto indicativo €. <input data-mqs="shipAmt" inputmode="decimal" value="${esc(q.shipAmt==null?'20':q.shipAmt)}" style="width:70px"> <input data-mqs="shipUnit" value="${esc(q.shipUnit==null?'a motore':q.shipUnit)}" style="width:120px"> + Iva</div></div>
     <div class="totals" style="min-width:320px">${vs.map(v=>`<div class="g"><span>Totale ${vs.length>1?(v===2?'predisposto radio':'senza radio'):''}</span><span id="mqTot${v}">${eur(mqTot(q,v))}</span></div>`).join('')}</div></div></section>
   <section class="sec"><header><h3>Note e colore</h3></header>
    <div class="grid"><label class="fld full"><span>Colore scelto dal cliente (va nelle NOTE del preventivo e dell'ordine)</span><input data-mqs="color" value="${esc(q.color||'')}" list="mqCol" placeholder="es. Grigio scuro RAL7016 opaco – GS"><datalist id="mqCol">${['BIANCO opaco','MARRONE RUGGINE raggrinzato – MR','GRIGIO CHIARO RAL7035 opaco – GC','GRIGIO SCURO RAL7016 opaco – GS','VERDE MUSCHIO RAL6005 opaco – VM'].map(x=>`<option value="${x}">`).join('')}</datalist></label>
-   <label class="fld full"><span>Note</span><textarea data-mqs="notes" rows="2">${esc(q.notes||'')}</textarea></label>
-   <div class="fld full"><span>Nota sul trasporto (nelle NOTE) – testo, colore, carattere e grandezza</span>${(()=>{const n=mqSN(q);return `<input data-mqs="shipNote" value="${esc(n.text)}" placeholder="Lascia vuoto per non stamparla"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px">Colore <input type="color" data-mqs="snColor" value="${esc(n.color)}" style="width:44px;padding:0;height:30px"> Carattere <select data-mqs="snFont">${MQ_FONTS.map(f=>`<option ${n.font===f?'selected':''} style="font-family:${f}">${f}</option>`).join('')}</select> Grandezza <input type="number" min="7" max="40" data-mqs="snSize" value="${n.size}" style="width:64px"></div><div id="mqSnPrev" style="margin-top:6px;font-weight:bold;color:${esc(n.color)};font-family:${esc(n.font)};font-size:${n.size}px;background:#fff;padding:4px 8px;border-radius:6px">${esc(n.text)}</div>`})()}</div>
-   ${['noteA','noteB','noteC'].map(k=>`<label class="fld full"><span>${({noteA:'Nota sotto la tabella',noteB:'Nota colore automazione',noteC:'Avvertenza (nelle NOTE)'})[k]}</span><input data-mqs="${k}" value="${esc(q[k]||'')}"></label>`).join('')}</div>
+   </div>
+   <div class="card" style="gap:8px"><b>Sovrapprezzo leva telescopica</b><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">€ <input data-mqs="teleAmt" inputmode="decimal" value="${esc(mqTeleAmt(q))}" style="width:70px"><span class="muted">a kit · si aggiunge da solo sulle doppie ante sotto 800 mm; sulle altre righe spunta «Leva tel.» nella tabella.</span></div></div>
+   <h5>NOTE (ogni riga va a capo sotto la scritta NOTE)</h5>
+   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap" class="muted">Per tutte le note: carattere <select id="mqAllF">${MQ_FONTS.map(f=>`<option>${f}</option>`).join('')}</select> grandezza <input id="mqAllS" type="number" min="7" max="40" value="11" style="width:60px"> colore <input id="mqAllC" type="color" value="#111111" style="width:44px;padding:0;height:30px"> <button class="btn sm" data-act="mqNlAll" data-k="fs">Applica carattere e grandezza</button><button class="btn sm" data-act="mqNlAll" data-k="c">Applica colore</button></div>
+   <div id="mqNl">${mqNotes(q).map((n,i)=>mqNlRow(n,i)).join('')}</div>
+   <div class="acts"><button class="btn sm" data-act="mqNlAdd">+ Aggiungi nota</button></div>
+   <div class="muted" style="font-size:12px">Anteprima:</div><div id="mqNlPrev" style="background:#fff;border:1px solid #999;border-radius:6px;padding:8px 10px">${mqNotesHtml(q)}</div>
    <img src="${MQ_DIR}colori.jpg" alt="Varianti di colore standard" style="max-width:520px;width:100%;background:#fff;border-radius:6px;margin-top:6px"></section></div>`;
 }
 document.head.insertAdjacentHTML('beforeend','<style>.mqt th{font-size:10.5px;padding:6px 4px;white-space:normal;line-height:1.2}.mqt td{padding:3px 2px}.mqt input,.mqt select{padding:4px 5px;font-size:13px}.mqt tr.mqw td{padding:0 2px 4px}</style>');
+/* righe delle NOTE: testo, colore, carattere, grandezza, grassetto */
+const MQ_NS={c:'#111111',f:'Arial',s:11,b:true};
+function mqNotes(q){
+  if(!q.nl){const sn=mqSN(q),L=[];
+    if(q.noteA)L.push({t:q.noteA,c:'#111111',f:'Arial',s:11,b:true});
+    if(q.noteB)L.push({t:q.noteB,c:'#111111',f:'Arial',s:11,b:true});
+    if(q.noteC)L.push({t:q.noteC,c:'#a40000',f:'Arial',s:11,b:true});
+    String(q.notes||'').split(/\n/).filter(x=>x.trim()).forEach(x=>L.push({t:x,c:'#a40000',f:'Arial',s:11,b:true}));
+    if(sn.text)L.push({t:sn.text,c:sn.color,f:sn.font,s:sn.size,b:true});
+    q.nl=L.map(n=>({id:uid(),...n}))}
+  return q.nl;
+}
+/* righe automatiche: colore scelto e leva telescopica */
+function mqAutoNotes(q){const st=q.nlAuto||MQ_NS,L=[];
+  if(q.color)L.push({...st,t:'Colore scelto dal cliente: '+q.color,auto:1});
+  if((q.rows||[]).some(mqLT))L.push({...st,t:'Per la variante leva telescopica sovrapprezzo € '+mqTeleAmt(q).toLocaleString('it-IT',{minimumFractionDigits:2}),auto:1});
+  return L}
+const mqAllNotes=q=>[...mqNotes(q),...mqAutoNotes(q)].filter(n=>String(n.t||'').trim());
+const mqNoteStyle=n=>`color:${n.c};font-family:'${n.f}',Arial,sans-serif;font-size:${n.s}px;font-weight:${n.b?'bold':'normal'};line-height:1.35;margin:0 0 5px`;
+function mqNotesHtml(q){return `<div style="font:bold 12px Arial;margin-bottom:6px">NOTE:</div>`+mqAllNotes(q).map(n=>`<div style="${mqNoteStyle(n)}">${esc(n.t)}</div>`).join('')}
+function mqNlRow(n,i){return `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px"><input data-nl="t" data-i="${i}" value="${esc(n.t)}" style="flex:1;min-width:240px"><input type="color" data-nl="c" data-i="${i}" value="${esc(n.c)}" style="width:40px;padding:0;height:30px" title="Colore"><select data-nl="f" data-i="${i}" title="Carattere">${MQ_FONTS.map(f=>`<option ${n.f===f?'selected':''}>${f}</option>`).join('')}</select><input type="number" data-nl="s" data-i="${i}" min="7" max="40" value="${n.s}" style="width:58px" title="Grandezza"><label style="display:flex;gap:3px;align-items:center" title="Grassetto"><input type="checkbox" data-nl="b" data-i="${i}" ${n.b?'checked':''}><b>G</b></label><button class="x" data-act="mqNlDel" data-i="${i}" aria-label="Elimina nota">×</button></div>`}
+function mqNlPrev(q){const e=$('#mqNlPrev');if(e)e.innerHTML=mqNotesHtml(q)}
+document.addEventListener('input',e=>{const t=e.target,q=MQ();if(!q||!t.dataset||!t.dataset.nl)return;const n=mqNotes(q)[+t.dataset.i];if(!n)return;const k=t.dataset.nl;
+  n[k]=k==='b'?t.checked:k==='s'?(num(t.value)||11):t.value;mqNlPrev(q);mqSave()});
+document.addEventListener('change',e=>{const t=e.target,q=MQ();if(!q||!t.dataset||!t.dataset.nl)return;const n=mqNotes(q)[+t.dataset.i];if(!n)return;const k=t.dataset.nl;n[k]=k==='b'?t.checked:k==='s'?(num(t.value)||11):t.value;mqNlPrev(q);mqSave()});
+Object.assign(ACT,{
+  mqNlAdd:()=>{const q=MQ();mqNotes(q).push({id:uid(),t:'',...(q.nl[q.nl.length-1]?{c:q.nl[q.nl.length-1].c,f:q.nl[q.nl.length-1].f,s:q.nl[q.nl.length-1].s,b:q.nl[q.nl.length-1].b}:MQ_NS)});save('mquotes',q,true);render();const L=document.querySelectorAll('[data-nl="t"]');L.length&&L[L.length-1].focus()},
+  mqNlDel:d=>{const q=MQ();mqNotes(q).splice(+d.i,1);save('mquotes',q,true);render()},
+  mqNlAll:d=>{const q=MQ(),f=$('#mqAllF').value,sz=num($('#mqAllS').value)||11,c=$('#mqAllC').value;
+    mqNotes(q).forEach(n=>{if(d.k==='fs'){n.f=f;n.s=sz}else n.c=c});q.nlAuto={...(q.nlAuto||MQ_NS),...(d.k==='fs'?{f,s:sz}:{c})};save('mquotes',q,true);render();toast('Applicato a tutte le note')}
+});
 function mqSnPrev(q){const e=$('#mqSnPrev');if(!e)return;const n=mqSN(q);e.textContent=n.text;e.style.color=n.color;e.style.fontFamily=n.font;e.style.fontSize=n.size+'px'}
 const mqSave=debounce(()=>{const q=MQ();if(q)save('mquotes',q,true)},600);
 function mqPatch(q){
@@ -4758,11 +4797,12 @@ document.addEventListener('input',e=>{
     else r[f]=t.value;
     if(f!=='tip'&&f!=='model'){mqPatch(q);mqSave()}}
   else if(t.dataset.mqh){q.h=q.h||{};if(t.dataset.mqh==='clientName')q.clientName=t.value;else q.h[t.dataset.mqh]=t.value;mqSave()}
-  else if(t.dataset.mqs&&t.tagName!=='SELECT'){q[t.dataset.mqs]=t.value;if(t.dataset.mqs==='disc')mqPatch(q);if(/^sn|shipNote/.test(t.dataset.mqs))mqSnPrev(q);mqSave()}
+  else if(t.dataset.mqs&&t.tagName!=='SELECT'){q[t.dataset.mqs]=t.value;if(t.dataset.mqs==='disc'||t.dataset.mqs==='teleAmt'){if(t.dataset.mqs==='teleAmt'){(q.rows||[]).forEach(r=>{if(r.t==='m')r.m1=r.m2=false})}mqPatch(q);mqNlPrev(q)}if(t.dataset.mqs==='color')mqNlPrev(q);if(/^sn|shipNote/.test(t.dataset.mqs))mqSnPrev(q);mqSave()}
   else if(t.dataset.mqd){q[t.dataset.mqd]=t.value;mqSave()}
 });
 document.addEventListener('change',e=>{
   const t=e.target,q=MQ();if(!q||!t.dataset)return;
+  if(t.dataset.mqlt!=null){const r=q.rows[+t.dataset.mqlt];r.lt=t.checked;if(r.lt===mqLTauto(r))r.lt=null;r.m1=r.m2=false;mqRecalc(q);save('mquotes',q,true);render();return}
   if(t.dataset.mqf==='tip'||t.dataset.mqf==='model'){const r=q.rows[+t.dataset.i];r[t.dataset.mqf]=t.value;r.codeM=false;r.m1=r.m2=false;mqRecalc(q);save('mquotes',q,true);render()}
   else if(t.dataset.mqs==='snFont'){q.snFont=t.value;mqSnPrev(q);mqSave()}
   else if(t.dataset.mqs&&t.tagName==='SELECT'){q[t.dataset.mqs]=t.value;if(t.dataset.mqs==='priceMode'){(q.rows||[]).forEach(r=>{if(r.t==='m'){r.m1=r.m2=false}});const cl=mqClient(q),L=cl&&(cl.links||[]).find(l=>l.companyId===q.companyId);if(t.value==='netto'&&!q.disc&&L)q.disc=L.discount||''}mqRecalc(q);save('mquotes',q,true);render()}
@@ -4852,7 +4892,9 @@ async function mqAssets(q){
   A.colori=await mqToPng(MQ_DIR+'colori.jpg');
   return A;
 }
-const MQ_PAGES=q=>q.kind==='ordine'?['Q'+mqVersions(q)[0],'rilievo_tipologie','rilievo_range']:['Q1','rilievo_tipologie','rilievo_range','Q2','radiocomandi_1','radiocomandi_2'];
+/* ver: 'both' | 'senza' | 'radio' — quali versioni mettere nel file */
+const MQ_PAGES=(q,ver)=>q.kind==='ordine'?['Q'+mqVersions(q)[0],'rilievo_tipologie','rilievo_range']:
+  ver==='senza'?['Q1','rilievo_tipologie','rilievo_range']:ver==='radio'?['Q2','rilievo_tipologie','rilievo_range','radiocomandi_1','radiocomandi_2']:['Q1','rilievo_tipologie','rilievo_range','Q2','radiocomandi_1','radiocomandi_2'];
 
 /* pagina del preventivo in HTML (A4 orizzontale, 1123×794) */
 function mqPageHtml(q,v,A){
@@ -4863,29 +4905,27 @@ function mqPageHtml(q,v,A){
     n++;return `<tr><td>${n}</td><td>${cell(r.tip)}</td><td>${cell(r.lf)}</td><td>${cell(r.lp)}</td><td>${cell(r.tt)}</td><td>${cell(r.hh)}</td><td>${cell(r.peso)}</td><td>${cell(r.p)}</td><td>${cell(r.z)}</td><td>${cell(r.y)}</td><td>${cell(r.s)}</td><td>${cell(mqModelTxt(r))}</td><td>${cell(r.code)}</td><td>${cell(r.qty)}</td><td class="r">${p?eurp(p):''}</td><td class="r">${tot?eur(tot):''}</td></tr>`}).join('');
   const empty=Math.max(0,4-(q.rows||[]).length);const pad=Array.from({length:empty},()=>'<tr>'+'<td>&nbsp;</td>'.repeat(16)+'</tr>').join('');
   const inf=(l,x)=>`<td class="lb">${l}</td><td class="vl">${cell(x)}</td>`;
-  const noteTxt=[q.noteC,q.color?'Colore scelto dal cliente: '+q.color:'',q.notes].filter(Boolean);
   return `<div class="pg"><div class="hd"><img class="lg" src="${A.logo.url}"><div class="ti">${cell(T.title)}${q.kind==='ordine'?' · ORDINE':''}</div>${A.client?`<img class="lg r" src="${A.client.url}">`:'<span></span>'}</div>
   <table class="inf"><tr>${inf('Azienda',hv.az)}${inf('Telefono',hv.phone)}${inf('Data',hv.date)}</tr><tr>${inf('Indirizzo',hv.addr)}${inf('e-mail',hv.email)}${inf('Richiesta',hv.rich+' n. '+q.number)}</tr><tr>${inf('P.Iva',hv.vat)}${inf('Persona di contatto',hv.contact)}${inf('Rif. Cantiere',hv.cant)}</tr></table>
   <table class="rq"><thead><tr><th rowspan="2"></th><th rowspan="2">tipologia di apertura (A-B-C)</th><th colspan="9">dimensioni (mm)</th><th colspan="3">prodotto</th><th rowspan="2">Prezzo Unitario</th><th rowspan="2">TOTALE</th></tr>
   <tr><th>LF= luce foro</th><th>LP= luce passaggio</th><th>T= telaio</th><th>H= altezza foro</th><th>peso ante kg</th><th>P= profondità utile</th><th>Z= bandella zancata</th><th>Y= persiana lamelle</th><th>S= spessore anta</th><th>modello</th><th>codice</th><th>quantità</th></tr></thead><tbody>${rows}${pad}</tbody></table>
-  <div class="nt">${cell(q.noteA)}</div><div class="nt">${cell(q.noteB)}</div>
   <div class="bt"><div class="col"><img src="${A.colori.url}"><div class="vr">${cell(mqVLabel(v))}</div></div><div class="sum"><div>${cell(mqTraspTxt(q))}</div><div class="tt"><span>TOTALE:</span><span>${eur(mqTot(q,v))}</span></div><div class="pl">${q.priceMode==='netto'?'PREZZI NETTI ESCLUSA IVA':'PREZZI DI LISTINO ESCLUSA IVA'}</div></div></div>
-  <div class="no"><b>NOTE:</b> ${noteTxt.map(cell).join('<br>')}${(()=>{const n=mqSN(q);return n.text?`<div style="color:${esc(n.color)};font-family:${esc(n.font)};font-size:${n.size}px;font-weight:bold;margin-top:3px">${cell(n.text)}</div>`:''})()}</div></div>`;
+  <div class="no">${mqNotesHtml(q)}</div></div>`;
 }
-const MQ_CSS=`.pg{width:1123px;height:794px;box-sizing:border-box;padding:26px 30px;background:#fff;color:#111;font:11px Arial,Helvetica,sans-serif;display:flex;flex-direction:column;gap:7px}
+const MQ_CSS=`.pg{width:1123px;min-height:794px;box-sizing:border-box;padding:26px 30px;background:#fff;color:#111;font:11px Arial,Helvetica,sans-serif;display:flex;flex-direction:column;gap:7px}
 .hd{display:grid;grid-template-columns:200px 1fr 200px;align-items:center;gap:10px}.lg{max-height:62px;max-width:200px;object-fit:contain}.lg.r{justify-self:end}.ti{text-align:center;font:bold 20px Arial;letter-spacing:.02em}
 table{border-collapse:collapse;width:100%}.inf td{border:1px solid #999;padding:4px 6px;height:18px}.inf .lb{background:#eef0f0;font-weight:bold;width:9%;white-space:nowrap}.inf .vl{width:24%}
 .rq th{border:1px solid #777;background:#e8eceb;font-size:9.5px;padding:3px;text-align:center;font-weight:bold}.rq td{border:1px solid #999;padding:4px 3px;text-align:center;height:17px;font-size:11px}.rq td.l{text-align:left}.rq td.r{text-align:right;white-space:nowrap}
 .nt{font-weight:bold;font-size:11px}.bt{display:grid;grid-template-columns:1fr 330px;gap:16px;align-items:start}.col img{width:100%;max-width:560px}.vr{font-weight:bold;font-size:13px;margin-top:4px}
 .sum div{padding:3px 0}.sum .ln{display:flex;justify-content:space-between;font-size:12px}.tt{display:flex;justify-content:space-between;font:bold 17px Arial;border-top:2px solid #111;border-bottom:2px solid #111;padding:6px 0!important}.pl{font-weight:bold;text-align:right}
-.no{border:1px solid #999;padding:6px 8px;min-height:40px;color:#a40000;font-weight:bold}`;
+.no{border:1px solid #999;padding:7px 10px;min-height:40px}`;
 async function mqRenderPage(html){
   const host=document.createElement('div');host.style.cssText='position:fixed;left:-14000px;top:0;width:1123px;background:#fff';
   host.innerHTML='<style>'+MQ_CSS+'</style>'+html;document.body.appendChild(host);
-  try{const clone=host.cloneNode(true);clone.setAttribute('style','width:1123px;background:#fff');clone.setAttribute('xmlns','http://www.w3.org/1999/xhtml');
-    const svg='<svg xmlns="http://www.w3.org/2000/svg" width="1123" height="794"><foreignObject x="0" y="0" width="1123" height="794">'+new XMLSerializer().serializeToString(clone)+'</foreignObject></svg>';
+  try{const H=Math.max(794,Math.ceil(host.querySelector('.pg').getBoundingClientRect().height));const clone=host.cloneNode(true);clone.setAttribute('style','width:1123px;background:#fff');clone.setAttribute('xmlns','http://www.w3.org/1999/xhtml');
+    const svg='<svg xmlns="http://www.w3.org/2000/svg" width="1123" height="'+H+'"><foreignObject x="0" y="0" width="1123" height="'+H+'">'+new XMLSerializer().serializeToString(clone)+'</foreignObject></svg>';
     const img=new Image();await new Promise((a,b)=>{img.onload=a;img.onerror=()=>b(new Error('render'));img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg)});
-    const S2=2,c=document.createElement('canvas');c.width=1123*S2;c.height=794*S2;const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.drawImage(img,0,0,c.width,c.height);
+    const S2=2,c=document.createElement('canvas');c.width=1123*S2;c.height=H*S2;const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.drawImage(img,0,0,c.width,c.height);
     const d=atob(c.toDataURL('image/jpeg',0.9).split(',')[1]),u=new Uint8Array(d.length);for(let i=0;i<d.length;i++)u[i]=d.charCodeAt(i);
     return {jpg:u,w:c.width,h:c.height,land:true}}finally{host.remove()}
 }
@@ -4904,15 +4944,15 @@ function mqPdf(pages){
   push('trailer\n<< /Size '+total+' /Root 1 0 R >>\nstartxref\n'+xr+'\n%%EOF');
   const out=new Uint8Array(len);let o=0;parts.forEach(b=>{out.set(b,o);o+=b.length});return out;
 }
-async function mqPdfFile(q){
+async function mqPdfFile(q,ver){
   const A=await mqAssets(q),pages=[];
-  for(const k of MQ_PAGES(q)){
+  for(const k of MQ_PAGES(q,ver)){
     if(k[0]==='Q'&&k.length===2)pages.push(await mqRenderPage(mqPageHtml(q,+k[1],A)));
     else{const u=await mqFetchBytes(MQ_DIR+k+'.jpg'),[w,h]=await mqImgDims(URL.createObjectURL(new Blob([u],{type:'image/jpeg'})));pages.push({jpg:u,w,h,land:w>h})}
   }
-  return new File([mqPdf(pages)],mqFileName(q)+'.pdf',{type:'application/pdf'});
+  return new File([mqPdf(pages)],mqFileName(q,ver)+'.pdf',{type:'application/pdf'});
 }
-const mqFileName=q=>(q.kind==='ordine'?'Ordine_':'Preventivo_')+String(q.number).replace(/[\\/:*?"<>|]/g,'-')+'_Antamatic_ante_battente'+((mqClient(q)||{}).name?'_'+mqClient(q).name.replace(/[^\w]+/g,'_').slice(0,30):'');
+const mqFileName=(q,ver)=>(q.kind==='ordine'?'Ordine_':'Preventivo_')+String(q.number).replace(/[\\/:*?"<>|]/g,'-')+'_Antamatic_ante_battente'+(ver==='senza'?'_senza_radio':ver==='radio'?'_predisposto_radio':'')+((mqClient(q)||{}).name?'_'+mqClient(q).name.replace(/[^\w]+/g,'_').slice(0,30):'');
 
 /* ---------- Excel (.xlsx) scritto direttamente, con loghi e immagini ---------- */
 const CRC=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0}return u=>{let c=0xFFFFFFFF;for(let i=0;i<u.length;i++)c=t[(c^u[i])&255]^(c>>>8);return (c^0xFFFFFFFF)>>>0}})();
@@ -4947,7 +4987,7 @@ const MQ_STYLES=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSh
 <xf numFmtId="0" fontId="4" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1"><alignment vertical="top" wrapText="1"/></xf>
 <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1"><alignment horizontal="left" vertical="center" wrapText="1"/></xf>
 </cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
-async function mqXlsxFile(q){
+async function mqXlsxFile(q,ver){
   const A=await mqAssets(q),hv=mqHeadVals(q),T=MQT[q.tpl];
   const rows={},merges=[],breaks=[],imgs=[],heights={};let R=0;
   const put=(r,c,v,s,f)=>{(rows[r]=rows[r]||{})[c]={v,s,f}};
@@ -4957,30 +4997,31 @@ async function mqXlsxFile(q){
   const pagePic=async(name)=>{const u=await mqFetchBytes(MQ_DIR+name+'.jpg'),[w,h]=await mqImgDims(URL.createObjectURL(new Blob([u],{type:'image/jpeg'})));
     const land=w>h,W=land?900:Math.round(620*w/h),H=Math.round(W*h/w);pic(R,land?0:4,{u8:u},W,H,'jpeg');const nr=Math.ceil(H/20)+1;for(let i=0;i<nr;i++)heights[R+i]=15;R+=nr;breaks.push(R);};
   const quotePage=v=>{
-    const r0=R;heights[R]=48;put(R,0,T.title+(q.kind==='ordine'?' · ORDINE':''),1);mg(R,0,R,10);
+    const r0=R;heights[R]=42;put(R,0,T.title+(q.kind==='ordine'?' · ORDINE':''),1);mg(R,0,R,10);
     {let h=52,w=Math.round(h*A.logo.w/A.logo.h);if(w>230){w=230;h=Math.round(w*A.logo.h/A.logo.w)}pic(R,11,A.logo,w,h,'png')}
     if(A.client){const h=48,w=Math.min(170,Math.round(h*A.client.w/A.client.h));pic(R,14,A.client,w,Math.round(w*A.client.h/A.client.w),'png')}
     R+=1;
     const info=[['Azienda',hv.az,'Telefono',hv.phone,'Data',hv.date],['Indirizzo',hv.addr,'e-mail',hv.email,'Richiesta',hv.rich+' n. '+q.number],['P.Iva',hv.vat,'Persona di contatto',hv.contact,'Rif. Cantiere',hv.cant]];
-    for(const L of info){heights[R]=20;put(R,0,L[0],2);put(R,1,'',2);mg(R,0,R,1);put(R,2,L[1],3);[3,4,5].forEach(c=>put(R,c,'',3));mg(R,2,R,5);put(R,6,L[2],2);put(R,7,'',2);mg(R,6,R,7);put(R,8,L[3],3);[9,10,11].forEach(c=>put(R,c,'',3));mg(R,8,R,11);put(R,12,L[4],2);put(R,13,L[5],3);[14,15].forEach(c=>put(R,c,'',3));mg(R,13,R,15);R+=1}R++;
+    for(const L of info){heights[R]=18;put(R,0,L[0],2);put(R,1,'',2);mg(R,0,R,1);put(R,2,L[1],3);[3,4,5].forEach(c=>put(R,c,'',3));mg(R,2,R,5);put(R,6,L[2],2);put(R,7,'',2);mg(R,6,R,7);put(R,8,L[3],3);[9,10,11].forEach(c=>put(R,c,'',3));mg(R,8,R,11);put(R,12,L[4],2);put(R,13,L[5],3);[14,15].forEach(c=>put(R,c,'',3));mg(R,13,R,15);R+=1}R++;
     const H=['','tipologia di apertura (A-B-C)','LF= luce foro','LP= luce passaggio','T= dimensione telaio','H= altezza del foro','peso totale ante kg','P= profondità utile','Z= bandella zancata','Y= persiana con lamelle','S= spessore anta','modello','codice','quantità','Prezzo Unitario','TOTALE'];
-    heights[R]=40;H.forEach((h,c)=>put(R,c,h,4));R++;const first=R;let n=0;
-    for(const r of q.rows||[]){heights[R]=r.t==='d'?24:(mqModelTxt(r).length>12?26:18);const p=mqPrice(q,r,v);
+    heights[R]=34;H.forEach((h,c)=>put(R,c,h,4));R++;const first=R;let n=0;
+    for(const r of q.rows||[]){heights[R]=r.t==='d'?20:(mqModelTxt(r).length>12?24:17);const p=mqPrice(q,r,v);
       if(r.t==='d'){put(R,0,'',5);put(R,1,r.desc||'',11);for(let c=2;c<=11;c++)put(R,c,'',11);mg(R,1,R,11)}
       else{n++;put(R,0,n,5);[r.tip,r.lf,r.lp,r.tt,r.hh,r.peso,r.p,r.z,r.y,r.s].forEach((x,i)=>put(R,i+1,x===''||x==null?'':(isFinite(+String(x).replace(',','.'))&&String(x).trim()!==''&&i>0?+String(x).replace(',','.'):x),5));put(R,11,mqModelTxt(r),5)}
       put(R,12,r.code||'',5);put(R,13,num(r.qty),5);put(R,14,p,6);put(R,15,null,6,`N${R+1}*O${R+1}`);R++}
     for(let k=(q.rows||[]).length;k<4;k++){heights[R]=18;for(let c=0;c<=15;c++)put(R,c,'',c>=14?6:5);R++}
     const last=R-1;R++;
-    put(R,1,q.noteA||'',9);mg(R,1,R,15);R++;put(R,1,q.noteB||'',9);mg(R,1,R,15);R+=1;
-    const cr=R;const cw=440;pic(R,1,A.colori,cw,Math.round(cw*A.colori.h/A.colori.w),'png');
-    put(R,11,mqTraspTxt(q),8);mg(R,11,R,15);R+=2;put(R,11,'TOTALE:',9);mg(R,11,R,13);put(R,14,null,7,`SUM(P${first+1}:P${last+1})`);mg(R,14,R,15);R+=2;
-    put(R,11,q.priceMode==='netto'?'PREZZI NETTI ESCLUSA IVA':'PREZZI DI LISTINO ESCLUSA IVA',9);mg(R,11,R,15);
-    R=Math.max(R+1,cr+Math.ceil(cw*A.colori.h/A.colori.w/20)+1);
-    put(R,1,mqVLabel(v),9);mg(R,1,R,15);R+=1;
-    {const n=mqSN(q),base='NOTE: '+[q.noteC,q.color?'Colore scelto dal cliente: '+q.color:'',q.notes].filter(Boolean).join('\n');heights[R]=Math.max(42,30+(n.text?n.size*1.4:0));put(R,0,{rich:[{t:base,b:1,sz:10,color:'A40000',font:'Arial'},...(n.text?[{t:'\n'+n.text,b:1,sz:n.size,color:n.color.replace('#','').toUpperCase(),font:n.font}]:[])]},10)}for(let c=1;c<=15;c++)put(R,c,'',10);mg(R,0,R,15);R+=1;
+    /* sotto la tabella: versione e totali, poi NOTE a sinistra e colori a destra */
+    put(R,1,mqVLabel(v),9);mg(R,1,R,10);put(R,11,mqTraspTxt(q),8);mg(R,11,R,15);R++;
+    put(R,11,'TOTALE:',9);mg(R,11,R,13);put(R,14,null,7,`SUM(P${first+1}:P${last+1})`);mg(R,14,R,15);R++;
+    put(R,11,q.priceMode==='netto'?'PREZZI NETTI ESCLUSA IVA':'PREZZI DI LISTINO ESCLUSA IVA',9);mg(R,11,R,15);R++;
+    {const L=mqAllNotes(q),cw=330,ch=Math.round(cw*A.colori.h/A.colori.w);
+      heights[R]=Math.min(409,Math.max(ch*0.75+8,20+L.reduce((t,n)=>t+n.s*1.35+3,0)));
+      put(R,0,{rich:[{t:'NOTE:',b:1,sz:11,color:'111111',font:'Arial'},...L.map(n=>({t:'\n'+n.t,b:n.b?1:0,sz:n.s,color:String(n.c||'#111111').replace('#','').toUpperCase(),font:n.f}))]},10);for(let c=1;c<=10;c++)put(R,c,'',10);mg(R,0,R,10);
+      pic(R,11,A.colori,cw,ch,'png');R+=1;}
     breaks.push(R);
   };
-  for(const k of MQ_PAGES(q)){if(k[0]==='Q'&&k.length===2)quotePage(+k[1]);else await pagePic(k)}
+  for(const k of MQ_PAGES(q,ver)){if(k[0]==='Q'&&k.length===2)quotePage(+k[1]);else await pagePic(k)}
   /* foglio */
   const cellXml=(r,c,x)=>{const ref=colL(c)+(r+1);
     if(x.f){const m=/^N(\d+)\*O(\d+)$/.exec(x.f);let val='';if(m){const a=rows[+m[1]-1]||{},b=a[13],d=a[14];val=num(b&&b.v)*num(d&&d.v)}else{const m3=/^O(\d+)\+O(\d+)$/.exec(x.f);if(m3){const g=k=>{const c=(rows[k-1]||{})[14];if(!c)return 0;if(c.f){const mm=/^SUM\(P(\d+):P(\d+)\)$/.exec(c.f);let t=0;if(mm)for(let i=+mm[1]-1;i<=+mm[2]-1;i++){const a=rows[i]||{};if(a[13]&&a[14])t+=num(a[13].v)*num(a[14].v)}return t}return num(c.v)};val=r2(g(+m3[1])+g(+m3[2]))}const m2=/^SUM\(P(\d+):P(\d+)\)$/.exec(x.f);if(m2){let s=0;for(let i=+m2[1]-1;i<=+m2[2]-1;i++){const a=rows[i]||{};if(a[13]&&a[14])s+=num(a[13].v)*num(a[14].v)}val=r2(s)}}
@@ -4991,7 +5032,7 @@ async function mqXlsxFile(q){
     return `<c r="${ref}" s="${x.s}" t="inlineStr"><is><t xml:space="preserve">${xe(x.v)}</t></is></c>`};
   const maxR=Math.max(R,...Object.keys(rows).map(Number));let sd='';
   for(let r=0;r<=maxR;r++){const cs=rows[r],h=heights[r];if(!cs&&!h)continue;sd+=`<row r="${r+1}"${h?` ht="${h}" customHeight="1"`:''}>`+(cs?Object.keys(cs).map(Number).sort((a,b)=>a-b).map(c=>cellXml(r,c,cs[c])).join(''):'')+'</row>'}
-  const widths=[4.7,11.3,8.3,8.3,8.3,8.3,8.3,9.3,8.3,8.3,8.3,12,10.5,8.5,11,11.5];
+  const widths=[4.7,11.3,8.3,8.3,8.3,8.3,8.3,9.3,8.3,8.3,8.3,12,12.5,8.5,11,11.5];
   const sheet=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><sheetViews><sheetView workbookViewId="0" zoomScale="90"/></sheetViews><sheetFormatPr defaultRowHeight="15"/><cols>${widths.map((w,i)=>`<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`).join('')}</cols><sheetData>${sd}</sheetData>${merges.length?`<mergeCells count="${merges.length}">${merges.map(m=>`<mergeCell ref="${m}"/>`).join('')}</mergeCells>`:''}<pageMargins left="0.4" right="0.4" top="0.4" bottom="0.4" header="0.2" footer="0.2"/><pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="0"/>${breaks.length?`<rowBreaks count="${breaks.length}" manualBreakCount="${breaks.length}">${breaks.map(b=>`<brk id="${b}" max="16383" man="1"/>`).join('')}</rowBreaks>`:''}<drawing r:id="rId1"/></worksheet>`;
   const E=9525;let dr='',rel='';const media=[];
   imgs.forEach((im,i)=>{const ext=im.type==='jpeg'?'jpeg':'png',nm=`image${i+1}.${ext}`;media.push({name:'xl/media/'+nm,data:im.img.u8});rel+=`<Relationship Id="rId${i+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/${nm}"/>`;
@@ -5007,7 +5048,7 @@ async function mqXlsxFile(q){
     {name:'xl/drawings/drawing1.xml',data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">${dr}</xdr:wsDr>`},
     {name:'xl/drawings/_rels/drawing1.xml.rels',data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rel}</Relationships>`},
     ...media];
-  return new File([mqZip(files)],mqFileName(q)+'.xlsx',{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  return new File([mqZip(files)],mqFileName(q,ver)+'.xlsx',{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
 }
 
 /* ---------- invio ---------- */
@@ -5016,7 +5057,8 @@ function mqPhone(q){const cl=mqClient(q)||{},c=(cl.contacts||[]).find(x=>x.name&
 function mqOutModal(){
   const q=MQ();
   $('#modal').innerHTML=`<div class="scrim" data-act="closeModal"></div><div class="sheet"><header><h3>${q.kind==='ordine'?'Ordine':'Preventivo'} ${esc(q.number)} · stampa e invio</h3><button class="x" data-act="closeModal" aria-label="Chiudi">×</button></header>
-  <p class="muted">Il PDF contiene ${q.kind==='ordine'?"la pagina dell'ordine e le 2 pagine «Rilievo quote»":'la versione senza radio, le 2 pagine «Rilievo quote», la versione predisposto radio e le pagine dei radiocomandi'}. Le foto degli accessori non vengono inserite.</p>
+  <p class="muted">Il file contiene sempre le 2 pagine «Rilievo quote». Le foto degli accessori non vengono inserite.</p>
+  ${q.kind==='ordine'?'':`<h5>Cosa far vedere al cliente</h5><div style="display:flex;flex-direction:column;gap:4px;margin-bottom:6px">${[['both','Entrambe le soluzioni (senza radio e predisposto radio)'],['senza','Solo la versione SENZA radio'],['radio','Solo la versione PREDISPOSTO RADIO (con pagine radiocomandi)']].map(([k,l])=>`<label style="display:flex;gap:8px;align-items:center"><input type="radio" name="mqVer" value="${k}" ${(ui.mqVer||'both')===k?'checked':''}> ${l}</label>`).join('')}</div>`}
   <div class="acts" style="flex-wrap:wrap"><button class="btn pri" data-act="mqGo" data-w="pdf">⬇ Scarica PDF</button><button class="btn" data-act="mqGo" data-w="xlsx">⬇ Scarica Excel</button></div>
   <h5>Invia</h5><div class="acts" style="flex-wrap:wrap"><button class="btn pri" data-act="mqGo" data-w="share">📎 Invia PDF (WhatsApp, mail…)</button><button class="btn" data-act="mqGo" data-w="shareX">📎 Invia Excel</button><button class="btn" data-act="mqGo" data-w="wa">WhatsApp</button><button class="btn" data-act="mqGo" data-w="mail">Email</button></div>
   <p class="muted" id="mqOutMsg">Dal telefono o dal tablet «Invia» apre WhatsApp, la mail o le altre app con il file già allegato. Dal computer il file viene scaricato e si apre WhatsApp o la mail: allega il file appena scaricato.</p>
@@ -5025,7 +5067,8 @@ function mqOutModal(){
 ACT.mqGo=async d=>{const q=MQ(),m=$('#mqOutMsg'),w=d.w;
   const say=t=>{if(m)m.textContent=t};
   try{say('Preparo il file…');
-    const f=(w==='xlsx'||w==='shareX')?await mqXlsxFile(q):await mqPdfFile(q);
+    const r0=document.querySelector('[name=mqVer]:checked'),ver=r0?r0.value:'both';ui.mqVer=ver;
+    const f=(w==='xlsx'||w==='shareX')?await mqXlsxFile(q,ver):await mqPdfFile(q,ver);
     if(w==='share'||w==='shareX'){try{if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f],title:f.name,text:mqMsg(q)});say('Inviato.');return}}catch(e){if(e&&e.name==='AbortError'){say('');return}}}
     await DL.save({filename:f.name,data:f});
     if(w==='wa'||w==='share'||w==='shareX'){const p=mqPhone(q);window.open((p?'https://wa.me/'+p:'https://wa.me/')+'?text='+encodeURIComponent(mqMsg(q)),'_blank');say('File scaricato: allegalo nella chat di WhatsApp ('+f.name+').')}
@@ -5082,7 +5125,7 @@ function odGate(kind,extra){
 Object.assign(ACT,{
   odMenu:()=>{
     $('#modal').innerHTML=`<div class="scrim" data-act="closeModal"></div><div class="sheet"><header><h3>OneDrive e backup</h3><button class="x" data-act="closeModal" aria-label="Chiudi">×</button></header>
-    <p class="muted" style="margin:0">Versione app: 28/11/2026 · 15</p><p>I dati sono nella cartella <b>${esc(OD_CFG.folder)}</b> del tuo OneDrive${OD.user?' ('+esc(OD.user)+')':''}. Ogni giorno, alla prima apertura, l'app salva da sola un backup nella sottocartella <b>backup</b> (restano gli ultimi 40).</p>
+    <p class="muted" style="margin:0">Versione app: 28/11/2026 · 16</p><p>I dati sono nella cartella <b>${esc(OD_CFG.folder)}</b> del tuo OneDrive${OD.user?' ('+esc(OD.user)+')':''}. Ogni giorno, alla prima apertura, l'app salva da sola un backup nella sottocartella <b>backup</b> (restano gli ultimi 40).</p>
     <div class="acts" style="flex-wrap:wrap"><button class="btn pri" data-act="odBackupNow">Fai un backup adesso</button><button class="btn" data-act="odBackupDl">Scarica backup sul dispositivo</button><button class="btn" data-act="odSyncNow">Aggiorna dagli altri dispositivi</button></div>
     ${OD.detail?`<p style="color:var(--bad)"><b>Ultimo errore:</b> <span class="mono">${esc(OD.detail)}</span></p>`:''}<h5>Aggiungi dati o ripristina un backup</h5><p class="muted">Carica un file preparato da Claude (es. clienti di un'azienda: si <b>aggiungono</b> ai tuoi dati) oppure un file di backup (<b>sostituisce</b> i dati attuali). In entrambi i casi prima viene fatto un backup automatico.</p>
     <input type="file" accept=".json,application/json" id="odImp"><p id="odImpMsg" class="muted"></p>
