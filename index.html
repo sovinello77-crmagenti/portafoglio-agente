@@ -4239,7 +4239,7 @@ clientList=withTodoFilter(clientList,'clients');
 companyList=withTodoFilter(companyList,'companies');
 ACT.todoToggle=()=>{ui.todo=!ui.todo;render()};
 clientList=compWrap(clientList);
-const _setViewTodo=setView;setView=function(v){ui.todo=false;ui.comp=false;ui.ctab='cli';ui.utilCo='';ui.mq=null;_setViewTodo(v)};
+const _setViewTodo=setView;setView=function(v){ui.todo=false;ui.comp=false;ui.ctab='cli';ui.utilCo='';ui.mq=null;ui.atab='att';_setViewTodo(v)};
 function markTodo(){
   const col=ui.view==='clienti'?'clients':ui.view==='aziende'?'companies':null;if(!col)return;
   document.querySelectorAll('#app .row[data-act="sel"]').forEach(r=>{const e=byId(col,r.dataset.id);if(e&&todoMiss(e).length&&!r.querySelector('.todo')){const b=document.createElement('span');b.className='pill warn todo';b.textContent='Da completare';const st=r.querySelector('.r2 .pill');if(st){const w=document.createElement('span');w.style.cssText='display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end';st.replaceWith(w);w.append(b,st)}else{(r.querySelector('b')||r).after(b)}}});
@@ -4685,7 +4685,7 @@ function mqPickClient(tpl){
   $('#modal').innerHTML=`<div class="scrim" data-act="closeModal"></div><div class="sheet"><header><h3>Nuovo preventivo · ${esc(MQT[tpl].name)}</h3><button class="x" data-act="closeModal" aria-label="Chiudi">×</button></header>
   <p class="muted">Per chi è il preventivo? I dati e il logo del cliente si caricano da soli.</p><input id="mqCq" type="search" placeholder="Cerca cliente…" style="width:100%"><div id="mqCl" style="max-height:50vh;overflow:auto;margin-top:8px"></div>
   <footer><button class="btn" data-act="mqNewBlank" data-tpl="${tpl}">Senza cliente</button><button class="btn ghost" data-act="closeModal">Annulla</button></footer></div>`;
-  const draw=()=>{const q=mzN($('#mqCq').value);$('#mqCl').innerHTML=S.clients.filter(c=>!isComp(c)&&(!q||mzN(c.name+' '+(c.city||'')).includes(q))).sort((a,b)=>a.name.localeCompare(b.name,'it')).slice(0,60).map(c=>`<button type="button" class="row" data-act="mqNewFor" data-tpl="${tpl}" data-id="${c.id}" style="width:100%;margin-bottom:4px"><b>${esc(c.name)}</b><span>${esc([c.city,c.prov].filter(Boolean).join(' '))}</span></button>`).join('')||'<p class="muted">Nessun cliente.</p>'};
+  const draw=()=>{const q=mzN($('#mqCq').value);$('#mqCl').innerHTML=S.clients.filter(c=>!isComp(c)&&c.status!=='Inattivo'&&(!q||mzN(c.name+' '+(c.city||'')).includes(q))).sort((a,b)=>a.name.localeCompare(b.name,'it')).slice(0,60).map(c=>`<button type="button" class="row" data-act="mqNewFor" data-tpl="${tpl}" data-id="${c.id}" style="width:100%;margin-bottom:4px"><b>${esc(c.name)}</b><span>${esc([c.city,c.prov].filter(Boolean).join(' '))}</span></button>`).join('')||'<p class="muted">Nessun cliente.</p>'};
   $('#mqCq').oninput=draw;draw();$('#mqCq').focus();
 }
 
@@ -4836,7 +4836,7 @@ Object.assign(ACT,{
   mqAccAdd:d=>{const q=MQ();mqAddAcc(q,d.code);closeModal();save('mquotes',q,true);render();toast('Aggiunto: art. '+d.code)},
   mqAddCode:()=>{const q=MQ(),c=$('#mqCode').value.trim();if(!c)return;if(mqAddAcc(q,c)){save('mquotes',q,true);render();toast('Aggiunto: art. '+c)}else{q.rows.push({id:uid(),t:'d',desc:'',code:c,qty:1,p1:0,p2:0,m1:true,m2:true});save('mquotes',q,true);render();toast('Codice non a listino: scrivi descrizione e prezzo')}},
   mqChClient:()=>{const q=MQ();$('#modal').innerHTML=`<div class="scrim" data-act="closeModal"></div><div class="sheet"><header><h3>Scegli il cliente</h3><button class="x" data-act="closeModal" aria-label="Chiudi">×</button></header><input id="mqCq" type="search" placeholder="Cerca cliente…" style="width:100%"><div id="mqCl" style="max-height:50vh;overflow:auto;margin-top:8px"></div></div>`;
-    const draw=()=>{const s=mzN($('#mqCq').value);$('#mqCl').innerHTML=S.clients.filter(c=>!isComp(c)&&(!s||mzN(c.name+' '+(c.city||'')).includes(s))).sort((a,b)=>a.name.localeCompare(b.name,'it')).slice(0,60).map(c=>`<button type="button" class="row" data-act="mqSetClient" data-id="${c.id}" style="width:100%;margin-bottom:4px"><b>${esc(c.name)}</b><span>${esc([c.city,c.prov].filter(Boolean).join(' '))}</span></button>`).join('')};$('#mqCq').oninput=draw;draw();$('#mqCq').focus()},
+    const draw=()=>{const s=mzN($('#mqCq').value);$('#mqCl').innerHTML=S.clients.filter(c=>!isComp(c)&&c.status!=='Inattivo'&&(!s||mzN(c.name+' '+(c.city||'')).includes(s))).sort((a,b)=>a.name.localeCompare(b.name,'it')).slice(0,60).map(c=>`<button type="button" class="row" data-act="mqSetClient" data-id="${c.id}" style="width:100%;margin-bottom:4px"><b>${esc(c.name)}</b><span>${esc([c.city,c.prov].filter(Boolean).join(' '))}</span></button>`).join('')};$('#mqCq').oninput=draw;draw();$('#mqCq').focus()},
   mqSetClient:d=>{const q=MQ(),c=byId('clients',d.id);q.clientId=c.id;q.clientName=c.name;q.h.phone=q.h.phone||c.phone||'';q.h.email=q.h.email||c.email||'';const L=(c.links||[]).find(l=>l.companyId===q.companyId);if(L&&!q.disc)q.disc=L.discount||'';closeModal();mqRecalc(q);save('mquotes',q,true);render()},
   mqDel:()=>{const q=MQ();confirmBox('Eliminare '+(q.kind==='ordine'?"l'ordine":'il preventivo')+' '+esc(q.number)+'?',async()=>{await remove('mquotes',q.id,true);ui.mq=null;render()})},
   mqCopy:async()=>{const q=MQ(),c=JSON.parse(JSON.stringify(q));Object.assign(c,{id:uid(),kind:'preventivo',number:mqNextNum('preventivo'),date:today(),status:'Bozza',fromId:''});delete c.version;await save('mquotes',c,true);ui.view='preventivi';ui.mq=c.id;render();toast('Copia creata: '+c.number)},
@@ -4875,6 +4875,34 @@ function mqDecorate(){
     $('#title').textContent=(q.kind==='ordine'?'Ordine':'Preventivo')+' · '+MQT[q.tpl].name;$('#searchBox').innerHTML='';$('#topAct').innerHTML='';
     document.querySelector('.shell').classList.toggle('wide',!!ui.wide);const w=$('#app'),st=w.scrollTop;w.innerHTML=mqEditor(q);w.scrollTop=st}
 }
+
+/* preventivi e ordini classici: niente clienti inattivi nella scelta del cliente */
+function withActiveClients(fn,keep){return function(...a){const all=S.clients,k=keep(...a);S.clients=all.filter(c=>c.status!=='Inattivo'||c.id===k);try{return fn.apply(this,a)}finally{S.clients=all}}}
+quoteEditor=withActiveClients(quoteEditor,q=>q&&clientIdOf(q));
+qClientDrop=withActiveClients(qClientDrop,()=>{const q=ui.qid&&byId('quotes',ui.qid);return q&&clientIdOf(q)});
+
+/* ---------- Aziende: sezione «Inattive» (scelte a mano) ---------- */
+ui.atab='att';
+const coInact=c=>!!(c&&c.inactive);
+const _coListInact=companyList;
+companyList=function(){
+  const all=S.companies,n=all.filter(coInact).length;
+  S.companies=all.filter(c=>coInact(c)===(ui.atab==='inatt'));let h;try{h=_coListInact()}finally{S.companies=all}
+  const tabs=`<div class="acts" style="margin-bottom:8px;gap:4px"><button class="btn sm ${ui.atab!=='inatt'?'pri':''}" data-act="atab" data-t="att">Attive (${all.length-n})</button><button class="btn sm ${ui.atab==='inatt'?'pri':''}" data-act="atab" data-t="inatt">Inattive (${n})</button></div>`;
+  if(ui.atab==='inatt'&&!n)return '<div class="list">'+tabs+'<p class="muted">Nessuna azienda inattiva. Per spostarne una qui apri la sua scheda e premi «Segna come inattiva».</p></div>';
+  const i=h.indexOf('<div class="acts');return i>=0?h.slice(0,i)+tabs+h.slice(i):tabs+h;
+};
+ACT.atab=d=>{ui.atab=d.t;ui.sel=null;ui.todo=false;render()};
+ACT.coInact=async d=>{const c=byId('companies',d.id),to=!coInact(c);await save('companies',{...c,inactive:to},true);ui.sel=null;render();toast(c.name+(to?' spostata tra le aziende inattive':' di nuovo attiva'))};
+function coInactDecorate(){
+  if(ui.view==='aziende'&&ui.atab==='inatt')$('#title').textContent='Aziende inattive';
+  if(ui.view!=='aziende'||!ui.sel)return;const c=byId('companies',ui.sel),a=document.querySelector('#app .dhead .acts');
+  if(c&&a&&!a.querySelector('[data-act="coInact"]'))a.insertAdjacentHTML('beforeend',`<button class="btn" data-act="coInact" data-id="${c.id}">${coInact(c)?'Riattiva':'Segna come inattiva'}</button>`);
+  if(c&&coInact(c)){const t=document.querySelector('#app .dhead .t');if(t&&!t.querySelector('.coin'))t.insertAdjacentHTML('beforeend','<span class="pill bad coin">Inattiva</span>')}
+}
+/* le aziende inattive non compaiono nella scelta dell'azienda di preventivi e ordini */
+const _qeCoInact=quoteEditor;quoteEditor=function(q){const all=S.companies;S.companies=all.filter(c=>!coInact(c)||c.id===(q&&q.companyId));try{return _qeCoInact(q)}finally{S.companies=all}};
+const _qlCoInact=quotesList;quotesList=function(){const all=S.companies;S.companies=all.filter(c=>!coInact(c));try{return _qlCoInact()}finally{S.companies=all}};
 
 /* ---------- PDF, Excel e invio del preventivo da modello ---------- */
 async function mqFetchBytes(p){const r=await fetch(p);if(!r.ok)throw new Error('File mancante: '+p);return new Uint8Array(await r.arrayBuffer())}
@@ -5077,6 +5105,117 @@ ACT.mqGo=async d=>{const q=MQ(),m=$('#mqOutMsg'),w=d.w;
   }catch(e){console.error(e);say('Non riesco a creare il file: '+(e.message||e))}
 };
 
+
+/* =====================================================================
+   CONCORRENZA: conferme e fatture dei concorrenti + tabella comparativa
+   (i dati restano qui: non entrano nel venduto né nelle statistiche dei clienti)
+   ===================================================================== */
+COLS.push('cdocs');S.cdocs=[];
+const CD_T=['Conferma d\'ordine','Fattura','Offerta','Listino','Altro'];
+const cdKey=r=>nrm(r.code)||('d:'+String(r.desc||'').toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,40));
+const CD={};/* documento in modifica */
+/* esclude i concorrenti dalle statistiche */
+const _homeComp=home;home=function(){const c=S.clients,s=S.sales,ids=new Set(c.filter(x=>x.competitor).map(x=>x.id));S.clients=c.filter(x=>!x.competitor);S.sales=s.filter(x=>!ids.has(x.clientId));try{return _homeComp()}finally{S.clients=c;S.sales=s}};
+/* articoli del concorrente con prezzi minimo/massimo/medio */
+function cdArticles(compId){
+  const M=new Map();
+  S.cdocs.filter(d=>!compId||d.competitorId===compId).forEach(d=>(d.rows||[]).forEach(r=>{const p=num(r.price);if(!(p>0))return;const k=(compId?'':d.competitorId+'|')+cdKey(r);
+    let a=M.get(k);if(!a){a={key:cdKey(r),comp:d.competitorId,code:r.code||'',desc:r.desc||'',um:r.um||'',min:p,max:p,sum:0,n:0,last:d.date||'',lastP:p,clients:new Set()};M.set(k,a)}
+    a.min=Math.min(a.min,p);a.max=Math.max(a.max,p);a.sum+=p;a.n++;if(!a.desc&&r.desc)a.desc=r.desc;if((d.date||'')>=a.last){a.last=d.date||'';a.lastP=p}
+    const cl=d.clientId&&byId('clients',d.clientId);a.clients.add(cl?cl.name:d.clientName||'')}));
+  return [...M.values()].sort((a,b)=>String(a.desc||a.code).localeCompare(String(b.desc||b.code),'it'));
+}
+/* mio articolo equivalente: prezzo di listino e venduto minimo/massimo dalle mie conferme */
+function cdMine(comp,key){const m=(comp.cmpMap||{})[key];if(!m||!m.companyId)return null;
+  const co=byId('companies',m.companyId),it=S.items.find(i=>i.companyId===m.companyId&&nrm(i.code)===nrm(m.code));
+  const ids=new Set(S.clients.filter(x=>x.competitor).map(x=>x.id)),sv=S.sales.filter(s=>s.companyId===m.companyId&&nrm(s.code)===nrm(m.code)&&!ids.has(s.clientId)).map(s=>num(s.price)).filter(p=>p>0);
+  return {co,code:m.code,name:it?it.name:(m.desc||''),list:it?num(it.price):null,min:sv.length?Math.min(...sv):null,max:sv.length?Math.max(...sv):null}}
+const cdP=x=>x==null?'—':eurp(x);
+function cdDiff(a,m){if(!m)return '';const ref=m.min!=null?(m.min+m.max)/2:m.list;if(!ref)return '';const avg=a.sum/a.n,d=r2((avg/ref-1)*100);return `<span style="color:${d<0?'var(--bad)':'var(--ok)'};font-weight:600">${d>0?'+':''}${String(d).replace('.',',')}%</span>`}
+function cdTable(compId,editable){
+  const A=cdArticles(compId);if(!A.length)return '<p class="muted">Nessun prezzo ancora: carica una conferma o una fattura e inserisci le righe.</p>';
+  return `<div class="tw"><table style="min-width:980px"><thead><tr>${compId?'':'<th>Concorrente</th>'}<th>Articolo concorrente</th><th class="num">Prezzo min</th><th class="num">Prezzo max</th><th class="num">Medio</th><th class="num">Rilevazioni</th><th>Ultimo</th><th>Mio articolo equivalente</th><th class="num">Mio listino</th><th class="num">Mio venduto min</th><th class="num">Mio venduto max</th><th class="num">Concorrente vs me</th></tr></thead><tbody>
+  ${A.map(a=>{const comp=byId('clients',a.comp)||{},m=cdMine(comp,a.key);
+    return `<tr>${compId?'':`<td><b>${esc(comp.name||'')}</b></td>`}<td><b>${esc(a.desc||'')}</b>${a.code?`<div class="muted mono">${esc(a.code)}</div>`:''}<div class="muted" style="font-size:11.5px">${esc([...a.clients].filter(Boolean).slice(0,3).join(', '))}</div></td>
+    <td class="num">${eurp(a.min)}</td><td class="num">${eurp(a.max)}</td><td class="num">${eurp(a.sum/a.n)}</td><td class="num">${a.n}</td><td>${fdate(a.last)}<div class="muted">${eurp(a.lastP)}</div></td>
+    <td>${m?`<b>${esc(m.code)}</b> ${esc(m.name)}<div class="muted">${esc(m.co?m.co.name:'')}</div>`:'<span class="muted">non collegato</span>'}${editable?`<div><button class="btn sm" data-act="cdMap" data-comp="${a.comp}" data-k="${esc(a.key)}" data-d="${esc(a.desc||a.code)}">${m?'Cambia':'Collega'}</button></div>`:''}</td>
+    <td class="num">${m?cdP(m.list):'—'}</td><td class="num">${m?cdP(m.min):'—'}</td><td class="num">${m?cdP(m.max):'—'}</td><td class="num">${cdDiff(a,m)}</td></tr>`}).join('')}</tbody></table></div>
+  <p class="muted" style="font-size:12px">«Concorrente vs me» confronta il prezzo medio del concorrente con il tuo venduto medio (o, se non hai venduto, con il tuo listino): in rosso se il concorrente è più basso.</p>`;
+}
+/* sezione nella scheda del concorrente */
+const _cdDet=clientDetail;
+clientDetail=function(c){
+  let h=_cdDet(c);if(!c.competitor)return h;
+  h=h.replace(/<section class="sec"><header><h3>Storico venduto<\/h3>[\s\S]*?<\/section>/,'');
+  const docs=S.cdocs.filter(d=>d.competitorId===c.id).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const sec=`<section class="sec"><header><h3>Conferme e fatture della concorrenza</h3><button class="btn sm pri" data-act="cdNew" data-id="${c.id}">+ Carica documento</button></header>
+  <p class="muted" style="margin:0">Restano solo qui: non entrano nel venduto né nelle statistiche dei clienti.</p>
+  ${docs.length?`<div class="list">${docs.map(d=>{const cl=d.clientId&&byId('clients',d.clientId);return `<button class="row" data-act="cdOpen" data-id="${d.id}"><div class="r2"><b>${esc(d.type||'Documento')} ${esc(d.no||'')}${d.date?' del '+fdate(d.date):''}</b><span class="muted">${(d.rows||[]).length} righe · ${(d.files||[]).length} file</span></div><span>${esc(cl?cl.name:d.clientName||'Cliente non indicato')}</span></button>`}).join('')}</div>`:'<p class="muted">Nessun documento. Carica una conferma o una fattura (PDF o foto) e inserisci gli articoli con i prezzi.</p>'}</section>
+  <section class="sec"><header><h3>Tabella comparativa prezzi</h3><button class="btn sm" data-act="cdAll">Confronto con tutti i concorrenti</button></header>${cdTable(c.id,true)}</section>`;
+  const i=h.lastIndexOf('</div>');return h.slice(0,i)+sec+h.slice(i);
+};
+/* modulo del documento */
+function cdModal(){
+  const d=CD.doc,comp=byId('clients',d.competitorId)||{};
+  const cls=S.clients.filter(x=>!x.competitor).sort((a,b)=>a.name.localeCompare(b.name,'it'));
+  $('#modal').innerHTML=`<div class="scrim" data-act="closeModal"></div><div class="sheet" style="width:min(980px,calc(100% - 24px))"><header><h3>${esc(comp.name||'')} · documento della concorrenza</h3><button class="x" data-act="closeModal" aria-label="Chiudi">×</button></header>
+  <div class="grid" style="grid-template-columns:repeat(4,minmax(0,1fr))"><label class="fld"><span>Tipo</span><select data-cd="type">${CD_T.map(t=>`<option ${d.type===t?'selected':''}>${t}</option>`).join('')}</select></label><label class="fld"><span>Numero</span><input data-cd="no" value="${esc(d.no||'')}"></label><label class="fld"><span>Data</span><input type="date" data-cd="date" value="${esc(d.date||'')}"></label>
+  <label class="fld"><span>Cliente che ha acquistato</span><input data-cd="clientName" list="cdCl" value="${esc((d.clientId&&(byId('clients',d.clientId)||{}).name)||d.clientName||'')}" placeholder="Scegli o scrivi"><datalist id="cdCl">${cls.map(c=>`<option value="${esc(c.name)}">`).join('')}</datalist></label></div>
+  <h5>File (PDF o foto)</h5><div class="acts">${(d.files||[]).map((f,i)=>`<span class="chip"><a href="#" data-act="cdFile" data-i="${i}">${esc(f.name)}</a> <button class="x" data-act="cdFileDel" data-i="${i}" aria-label="Togli">×</button></span>`).join('')}<label class="btn sm" style="cursor:pointer">+ Aggiungi file<input type="file" accept="application/pdf,image/*" multiple data-cdfile="1" style="display:none"></label><label class="btn sm" style="cursor:pointer">📷 Foto<input type="file" accept="image/*" capture="environment" data-cdfile="1" style="display:none"></label>${(d.files||[]).length?'<button class="btn sm" data-act="cdRead">Prova a leggere le righe dal file</button>':''}</div><p class="muted" id="cdMsg" style="margin:4px 0"></p>
+  <h5>Articoli e prezzi</h5><div class="tw"><table style="min-width:720px"><thead><tr><th>Codice</th><th>Descrizione</th><th>UM</th><th class="num">Q.tà</th><th class="num">Prezzo netto unit.</th><th></th></tr></thead><tbody>
+  ${(d.rows||[]).map((r,i)=>`<tr><td><input data-cdr="code" data-i="${i}" value="${esc(r.code||'')}" style="width:110px"></td><td><input data-cdr="desc" data-i="${i}" value="${esc(r.desc||'')}" style="width:100%;min-width:260px"></td><td><input data-cdr="um" data-i="${i}" value="${esc(r.um||'')}" style="width:50px"></td><td class="num"><input data-cdr="qty" data-i="${i}" value="${esc(r.qty==null?'':r.qty)}" style="width:70px" inputmode="decimal"></td><td class="num"><input data-cdr="price" data-i="${i}" value="${esc(r.price==null?'':r.price)}" style="width:100px" inputmode="decimal"></td><td><button class="x" data-act="cdRowDel" data-i="${i}" aria-label="Elimina">×</button></td></tr>`).join('')}
+  </tbody></table></div><div class="acts"><button class="btn sm" data-act="cdRowAdd">+ Riga</button></div>
+  <footer>${S.cdocs.some(x=>x.id===d.id)?'<button class="btn ghost danger" data-act="cdDel">Elimina documento</button>':''}<button class="btn ghost" data-act="closeModal">Annulla</button><button class="btn pri" data-act="cdSave">Salva</button></footer></div>`;
+}
+document.addEventListener('input',e=>{const t=e.target;if(!t.dataset||!CD.doc)return;
+  if(t.dataset.cd){CD.doc[t.dataset.cd]=t.value}else if(t.dataset.cdr){const r=CD.doc.rows[+t.dataset.i];r[t.dataset.cdr]=(t.dataset.cdr==='qty'||t.dataset.cdr==='price')?(t.value===''?'':num(t.value)):t.value}});
+document.addEventListener('change',async e=>{const t=e.target;if(!t.dataset||!t.dataset.cdfile||!CD.doc)return;const fs=[...t.files];t.value='';
+  const m=$('#cdMsg');for(const f of fs){if(m)m.textContent='Salvo '+f.name+'…';try{const r=await ASSETS.upload(f,{type:f.type});(CD.doc.files=CD.doc.files||[]).push({id:r.id,name:f.name,type:f.type});CD.raw=(CD.raw||[]).concat([f])}catch(err){toast('File non salvato: '+f.name)}}
+  cdModal();});
+async function cdReadRows(){
+  const m=$('#cdMsg'),d=CD.doc;if(m)m.textContent='Leggo il file…';const pages=[];
+  try{for(const f of d.files||[]){const u=await blobLoad(f.id);if(!u)continue;const b=await (await fetch(u)).blob();
+      if(/^image\//.test(f.type||b.type)){const bmp=await createImageBitmap(b),k=Math.min(3000/bmp.width,Math.max(1,2200/bmp.width)),cv=document.createElement('canvas');cv.width=Math.round(bmp.width*k);cv.height=Math.round(bmp.height*k);const x=cv.getContext('2d');x.filter='grayscale(1) contrast(1.35)';x.drawImage(bmp,0,0,cv.width,cv.height);if(m)m.textContent='Riconoscimento del testo dalla foto…';pages.push((await (await esWorker()).recognize(cv)).data.text||'')}
+      else{const lib=await pdfLoadLib(),doc=await lib.getDocument({data:new Uint8Array(await b.arrayBuffer())}).promise;for(let p=1;p<=Math.min(doc.numPages,40);p++){const pg=await doc.getPage(p);let t=await (typeof svPageText==='function'?svPageText(pg):cpPageText(pg));if(t==null)t=await esOcrPage(pg);pages.push(t)}}}
+    const docs=svParse(pages),rows=docs.flatMap(x=>x.rows||[]);
+    if(!rows.length){if(m)m.textContent='Non sono riuscito a riconoscere le righe di questo documento: inseriscile a mano (codice, descrizione, prezzo).';return}
+    const d0=docs[0]||{};if(!d.no&&d0.no)d.no=d0.no;if(!d.date&&d0.date)d.date=d0.date;if(!d.clientName&&!d.clientId&&d0.client)d.clientName=d0.client;
+    d.rows=(d.rows||[]).filter(r=>r.code||r.desc).concat(rows.map(r=>({code:r.code||'',desc:r.desc||'',um:r.um||'',qty:r.qty,price:r.price})));cdModal();const mm=$('#cdMsg');if(mm)mm.textContent=rows.length+' righe lette: controllale prima di salvare.';
+  }catch(err){if(m)m.textContent='Lettura non riuscita: inserisci le righe a mano.'}
+}
+function cdMapModal(compId,key,desc){
+  const comp=byId('clients',compId),cur=(comp.cmpMap||{})[key]||{};const cos=S.companies.filter(c=>!c.inactive).sort((a,b)=>a.name.localeCompare(b.name,'it'));
+  $('#modal').innerHTML=`<div class="scrim" data-act="closeModal"></div><div class="sheet"><header><h3>Mio articolo equivalente</h3><button class="x" data-act="closeModal" aria-label="Chiudi">×</button></header>
+  <p>Articolo del concorrente: <b>${esc(desc)}</b></p>
+  <label class="fld"><span>Mia azienda</span><select id="cdmCo"><option value="">— scegli —</option>${cos.map(c=>`<option value="${c.id}" ${cur.companyId===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></label>
+  <label class="fld"><span>Codice o descrizione del mio articolo</span><input id="cdmQ" value="${esc(cur.code||'')}" placeholder="Cerca nel listino"></label><div id="cdmL" style="max-height:40vh;overflow:auto"></div>
+  <footer><button class="btn ghost danger" id="cdmRm">Scollega</button><button class="btn ghost" data-act="closeModal">Annulla</button></footer></div>`;
+  const draw=()=>{const co=$('#cdmCo').value,q=$('#cdmQ').value.trim().toLowerCase();if(!co){$('#cdmL').innerHTML='<p class="muted">Scegli prima l\'azienda.</p>';return}
+    const L=S.items.filter(i=>i.companyId===co&&(!q||(i.code+' '+i.name).toLowerCase().includes(q))).slice(0,50);
+    $('#cdmL').innerHTML=(L.map(i=>`<button type="button" class="row" data-cdmpick="${esc(i.code)}" style="width:100%;margin-bottom:4px"><b>${esc(i.code)}</b><span>${esc(i.name)} · ${eurp(i.price)}</span></button>`).join('')||'<p class="muted">Nessun articolo nel listino.</p>')+(q?`<button type="button" class="btn sm" data-cdmpick="${esc($('#cdmQ').value.trim())}">Usa «${esc($('#cdmQ').value.trim())}» anche se non è a listino</button>`:'')};
+  $('#cdmCo').onchange=draw;$('#cdmQ').oninput=draw;draw();
+  $('#cdmL').onclick=async e=>{const b=e.target.closest('[data-cdmpick]');if(!b)return;const map={...(comp.cmpMap||{})};map[key]={companyId:$('#cdmCo').value,code:b.dataset.cdmpick};await save('clients',{...comp,cmpMap:map},true);closeModal();render()};
+  $('#cdmRm').onclick=async()=>{const map={...(comp.cmpMap||{})};delete map[key];await save('clients',{...comp,cmpMap:map},true);closeModal();render()};
+}
+Object.assign(ACT,{
+  cdNew:d=>{CD.doc={id:uid(),competitorId:d.id,type:CD_T[0],no:'',date:today(),clientId:'',clientName:'',files:[],rows:[{code:'',desc:'',um:'',qty:1,price:''}]};cdModal()},
+  cdOpen:d=>{CD.doc=JSON.parse(JSON.stringify(byId('cdocs',d.id)));cdModal()},
+  cdRowAdd:()=>{CD.doc.rows.push({code:'',desc:'',um:'',qty:1,price:''});cdModal()},
+  cdRowDel:d=>{CD.doc.rows.splice(+d.i,1);cdModal()},
+  cdFile:async d=>{const f=CD.doc.files[+d.i],u=await blobLoad(f.id);if(u)window.open(u,'_blank');else toast('File non disponibile')},
+  cdFileDel:d=>{CD.doc.files.splice(+d.i,1);cdModal()},
+  cdRead:()=>cdReadRows(),
+  cdSave:async()=>{const d=CD.doc,cl=S.clients.find(c=>!c.competitor&&c.name===d.clientName);d.clientId=cl?cl.id:'';d.rows=(d.rows||[]).filter(r=>r.code||r.desc||r.price);await save('cdocs',d,true);CD.doc=null;closeModal();render();toast('Documento salvato')},
+  cdDel:()=>{const d=CD.doc;confirmBox('Eliminare questo documento della concorrenza?',async()=>{await remove('cdocs',d.id,true);CD.doc=null;render()})},
+  cdMap:d=>cdMapModal(d.comp,d.k,d.d),
+  cdAll:()=>{$('#modal').innerHTML=`<div class="scrim" data-act="closeModal"></div><div class="sheet" style="width:min(1250px,calc(100% - 24px))"><header><h3>Tabella comparativa · tutti i concorrenti</h3><button class="x" data-act="closeModal" aria-label="Chiudi">×</button></header>${cdTable('',false)}<footer><button class="btn" data-act="cdXls">Esporta Excel</button><button class="btn ghost" data-act="closeModal">Chiudi</button></footer></div>`},
+  cdXls:async()=>{if(typeof XLSX==='undefined'){toast('Excel non disponibile');return}
+    const rows=cdArticles('').map(a=>{const comp=byId('clients',a.comp)||{},m=cdMine(comp,a.key);return {'Concorrente':comp.name||'','Codice':a.code,'Articolo':a.desc,'Prezzo min':r2(a.min),'Prezzo max':r2(a.max),'Medio':r2(a.sum/a.n),'Rilevazioni':a.n,'Ultima data':fdate(a.last),'Mio articolo':m?m.code+' '+m.name:'','Mia azienda':m&&m.co?m.co.name:'','Mio listino':m&&m.list!=null?m.list:'','Mio venduto min':m&&m.min!=null?m.min:'','Mio venduto max':m&&m.max!=null?m.max:''}});
+    const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rows),'Confronto prezzi');await DL.save({filename:'Confronto_prezzi_concorrenza_'+today()+'.xlsx',data:new Uint8Array(XLSX.write(wb,{type:'array',bookType:'xlsx'}))})}
+});
+/* pulsante nella barra della sezione Concorrenti */
+function cdDecorate(){if(ui.view!=='clienti'||!ui.comp||ui.qid||ui.pl)return;const a=$('#topAct');if(a&&!a.querySelector('[data-act="cdAll"]'))a.insertAdjacentHTML('afterbegin','<button class="btn" data-act="cdAll">Tabella comparativa</button>')}
+
 /* ---------- più numeri di telefono per clienti e aziende ---------- */
 const PHONES_F={k:'phones',label:'Altri numeri di telefono (uno per riga, es. Magazzino: 0721 123456)',type:'textarea',rows:3,full:true};
 [CLIENT_F,COMPANY_F].forEach(F=>{if(F.some(f=>f.k==='phones'))return;const i=F.findIndex(f=>f.k==='phone');F.splice(i<0?F.length:i+1,0,PHONES_F)});
@@ -5105,7 +5244,7 @@ const _renderOD=render;
 document.head.insertAdjacentHTML('beforeend','<style>.row.inactive{border-left:4px solid var(--bad);background:var(--bad-soft)}.row.inactive b{color:var(--bad)}.dhead.inactive h2{color:var(--bad)}</style>');
 render=function(){
   _renderOD();
-  markTodo();compDecorate();collDecorate();utilDecorate();sedeDecorate();mapDecorate();mqDecorate();
+  markTodo();compDecorate();collDecorate();utilDecorate();sedeDecorate();mapDecorate();mqDecorate();coInactDecorate();cdDecorate();
   if(ui.view==='aziende'){const sp=document.querySelector('#app .split.h');if(sp)sp.classList.remove('h')}
   navOrder();
   document.querySelectorAll('#app .pill.bad').forEach(p=>{if(p.textContent.trim()!=='Inattivo')return;const r=p.closest('.row')||p.closest('.dhead');if(r)r.classList.add('inactive')});
@@ -5125,7 +5264,7 @@ function odGate(kind,extra){
 Object.assign(ACT,{
   odMenu:()=>{
     $('#modal').innerHTML=`<div class="scrim" data-act="closeModal"></div><div class="sheet"><header><h3>OneDrive e backup</h3><button class="x" data-act="closeModal" aria-label="Chiudi">×</button></header>
-    <p class="muted" style="margin:0">Versione app: 28/11/2026 · 16</p><p>I dati sono nella cartella <b>${esc(OD_CFG.folder)}</b> del tuo OneDrive${OD.user?' ('+esc(OD.user)+')':''}. Ogni giorno, alla prima apertura, l'app salva da sola un backup nella sottocartella <b>backup</b> (restano gli ultimi 40).</p>
+    <p class="muted" style="margin:0">Versione app: 28/11/2026 · 19</p><p>I dati sono nella cartella <b>${esc(OD_CFG.folder)}</b> del tuo OneDrive${OD.user?' ('+esc(OD.user)+')':''}. Ogni giorno, alla prima apertura, l'app salva da sola un backup nella sottocartella <b>backup</b> (restano gli ultimi 40).</p>
     <div class="acts" style="flex-wrap:wrap"><button class="btn pri" data-act="odBackupNow">Fai un backup adesso</button><button class="btn" data-act="odBackupDl">Scarica backup sul dispositivo</button><button class="btn" data-act="odSyncNow">Aggiorna dagli altri dispositivi</button></div>
     ${OD.detail?`<p style="color:var(--bad)"><b>Ultimo errore:</b> <span class="mono">${esc(OD.detail)}</span></p>`:''}<h5>Aggiungi dati o ripristina un backup</h5><p class="muted">Carica un file preparato da Claude (es. clienti di un'azienda: si <b>aggiungono</b> ai tuoi dati) oppure un file di backup (<b>sostituisce</b> i dati attuali). In entrambi i casi prima viene fatto un backup automatico.</p>
     <input type="file" accept=".json,application/json" id="odImp"><p id="odImpMsg" class="muted"></p>
