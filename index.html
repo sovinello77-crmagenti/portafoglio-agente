@@ -4239,7 +4239,7 @@ clientList=withTodoFilter(clientList,'clients');
 companyList=withTodoFilter(companyList,'companies');
 ACT.todoToggle=()=>{ui.todo=!ui.todo;render()};
 clientList=compWrap(clientList);
-const _setViewTodo=setView;setView=function(v){ui.todo=false;ui.comp=false;ui.ctab='cli';ui.utilCo='';_setViewTodo(v)};
+const _setViewTodo=setView;setView=function(v){ui.todo=false;ui.comp=false;ui.ctab='cli';ui.utilCo='';ui.mq=null;_setViewTodo(v)};
 function markTodo(){
   const col=ui.view==='clienti'?'clients':ui.view==='aziende'?'companies':null;if(!col)return;
   document.querySelectorAll('#app .row[data-act="sel"]').forEach(r=>{const e=byId(col,r.dataset.id);if(e&&todoMiss(e).length&&!r.querySelector('.todo')){const b=document.createElement('span');b.className='pill warn todo';b.textContent='Da completare';const st=r.querySelector('.r2 .pill');if(st){const w=document.createElement('span');w.style.cssText='display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end';st.replaceWith(w);w.append(b,st)}else{(r.querySelector('b')||r).after(b)}}});
@@ -4592,6 +4592,448 @@ function logoHead(h,o){const src=logoSrc(o);if(!src||h.includes('class="dlogo"')
 const _cdLogo=clientDetail;clientDetail=function(c){return logoHead(_cdLogo(c),c)};
 const _coLogo=companyDetail;companyDetail=function(c){return logoHead(_coLogo(c),c)};
 
+/* =====================================================================
+   PREVENTIVI DA MODELLO (per azienda) — primo modello: ANTAMATIC «ANTE A BATTENTE»
+   ===================================================================== */
+COLS.push('mquotes');S.mquotes=[];
+const MQ_DIR='moduli/antamatic/';
+const ANT={
+  kit:{'6918000':710,'6918000L':720,'6918000XL':740,'6918000XXL':780,'6918002':515,'6918003':515,
+       '5500080':80,'5500082':103,'5500083':114,'5500084':130,'5500085':149,'5010420':650,'5010422':469,'5010423':469},
+  radio:50,tele:40,
+  acc:[
+    {g:'Leve ante legate',code:'4713502',img:'leva_vista',price:85,desc:'Leva per ante legate per kit a vista – versione corta (ante da 40 a 60 cm)'},
+    {g:'Leve ante legate',code:'4713503',img:'leva_vista',price:85,desc:'Leva per ante legate per kit a vista – versione lunga (ante da 60 a 80 cm)'},
+    {g:'Leve ante legate',code:'4713500',img:'leva_incasso',price:75,desc:'Leva per ante legate per kit ad incasso – versione corta (ante da 40 a 60 cm)'},
+    {g:'Leve ante legate',code:'4713501',img:'leva_incasso',price:75,desc:'Leva per ante legate per kit ad incasso – versione lunga (ante da 60 a 80 cm)'},
+    {g:'Accessori Serie4',code:'5010371',img:'5010371',price:235,desc:'Kit batteria tampone 24V – autoswitch'},
+    {g:'Accessori Serie4',code:'5010404',img:'5010404',price:108,desc:'Modulo per interfaccia domotica'},
+    {g:'Accessori Serie4',code:'5010243',img:'5010243',price:35,desc:'Mozzo prolungato (telaio fino a 40 mm a vista / 60 mm incassato)'},
+    {g:'Accessori Serie4',code:'4705358',img:'4705358',price:81,desc:'Coppia di staffe per cappotto con distanziali'},
+    {g:'Accessori Serie4',code:'5010138',img:'5010138',price:8,desc:'Tappi ammortizzatori neri (con distanziali 5 e 10 mm)'},
+    {g:'Radiocomandi',code:'2708339',img:'2708339',price:60,desc:'Minitrasmettitore per comandi via radio a 2 canali'},
+    {g:'Radiocomandi',code:'2708338',img:'2708338',price:64,desc:'Minitrasmettitore per comandi via radio a 4 canali'},
+    {g:'Radiocomandi',code:'2708340',img:'2708340',price:76,desc:'Trasmettitore radio da parete a 2 canali'},
+    {g:'Radiocomandi',code:'2708343',img:'2708343',price:98,desc:'Trasmettitore portatile con clip di fissaggio a parete, 3 canali'},
+    {g:'Radiocomandi',code:'2708341',img:'2708341',price:108,desc:'Trasmettitore portatile con clip di fissaggio a parete, 18 canali'},
+    {g:'Radiocomandi',code:'2708342',img:'2708342',price:116,desc:'Trasmettitore portatile con clip di fissaggio a parete, 24 canali'},
+    {g:'Radiocomandi',code:'2708344',img:'2708344',price:76,desc:'Trasmettitore radio da parete 2 canali – placca bianca'},
+    {g:'Radiocomandi',code:'2708306',img:'2708306',price:83,desc:'Trasmettitore radio da parete 4 canali – placca bianca'},
+    {g:'Radiocomandi',code:'2708308',img:'2708308',price:204,desc:'Trasmettitore radio da parete 4 canali – placca in vetro'},
+    {g:'Radiocomandi',code:'2708355',img:'2708355',price:81,desc:'TX2B – trasmettitore da incasso 2 canali'}
+  ]
+};
+const MQT={'ant-battente':{name:'ANTE A BATTENTE',title:'RILIEVO QUOTE ANTE A BATTENTE',co:/antamatic|^sir\b/i,
+  notes:{noteA:'Automazione per larghezza massima foro: da 1560 mm fino a 2000 mm - Leve standard',noteB:"IN FASE DI ORDINE INDICARE IL COLORE DELL'AUTOMAZIONE (Guide e leve sono colore Nero)",trasp:'Trasporto indicativo €. 20 a motore + Iva',noteC:'ATTENZIONE VERIFICARE PESO ANTE - NON DEVONO SUPERARE I 40 kg. ad ANTA'}}};
+const mqCo=t=>S.companies.find(c=>MQT[t].co.test(c.name));
+const MQ=()=>ui.mq&&byId('mquotes',ui.mq);
+const TIP={A:'A – mono anta destro',B:'B – mono anta sinistro',C:'C – doppia anta'};
+const MODELS={completo:'Kit completo',predisp:'Solo predisposizione',motor:'Solo motorizzazione'};
+
+/* ---------- calcolo riga: codice, prezzo, controlli ---------- */
+function mqW(r){const lp=num(r.lp),lf=num(r.lf);return (num(r.tt)>0&&lp>0)?lp:(lf||lp)}
+function mqAuto(r){
+  const W=mqW(r),C=r.tip==='C',tel=num(r.tt)>0,m=r.model||'completo';let code='',size='';
+  const sz=W<=1150?'':W<=1500?'L':W<=2000?'XL':'XXL';
+  if(m==='completo'){code=C?'6918000'+sz:r.tip==='B'?'6918003':r.tip==='A'?'6918002':'';size=C?sz:''}
+  else if(m==='predisp'){code=C?({'':'5500082',L:'5500083',XL:'5500084',XXL:'5500085'})[sz]:(r.tip?'5500080':'')}
+  else code=C?'5010420':r.tip==='B'?'5010423':r.tip==='A'?'5010422':'';
+  let base=ANT.kit[code]||0;if(m!=='predisp'&&num(r.z)>0&&base)base+=ANT.tele;
+  return {code:code&&(tel&&m==='completo'?code+'T':code),p1:base,p2:base&&m!=='predisp'?base+ANT.radio:base};
+}
+function mqWarn(r){
+  if(r.t!=='m')return [];
+  const w=[],W=mqW(r),C=r.tip==='C',P=num(r.p),z=num(r.z),peso=num(r.peso),n=C?2:1;
+  if(!r.tip)w.push('Scegli la tipologia A, B o C');
+  if(W){if(C){const mn=P>0&&P<110&&!z?800:760;if(W<mn)w.push('Luce sotto il minimo doppia anta ('+mn+' mm)');if(W>2000&&W<=3000)w.push('Oltre 2000 mm: kit XXL per ante legate, aggiungi le leve');if(W>3000)w.push('Oltre 3000 mm: fuori range')}
+    else if(r.tip){if(W<495)w.push('Luce sotto il minimo mono anta (495 mm)');if(W>1000)w.push('Luce oltre il massimo mono anta (1000 mm)')}}
+  if(P&&P<100)w.push('Profondità P sotto 100 mm');if(z&&P&&P<110)w.push('Con bandella zancata P minimo 110 mm');if(z>130)w.push('Bandella zancata oltre 130 mm');
+  if(peso&&peso/n>40)w.push('Peso oltre 40 kg per anta ('+String(r2(peso/n)).replace('.',',')+' kg)');
+  return w;
+}
+const mqDisc=q=>q.priceMode==='netto'?cascade(q.disc):1;
+function mqRecalc(q){(q.rows||[]).forEach(r=>{if(r.t!=='m'){if(r.lst!=null){if(!r.m1)r.p1=r5(r.lst*mqDisc(q));if(!r.m2)r.p2=r.m1?num(r.p1):r5(r.lst*mqDisc(q))}return}const a=mqAuto(r);if(!r.codeM)r.code=a.code;
+  if(!r.m1)r.p1=r5(a.p1*mqDisc(q));if(!r.m2)r.p2=r.m1&&r.model!=='predisp'?r5(num(r.p1)+ANT.radio*mqDisc(q)):r.m1?num(r.p1):r5(a.p2*mqDisc(q))})}
+const mqPrice=(q,r,v)=>num(v===2?r.p2:r.p1);
+const mqSub=(q,v)=>r2((q.rows||[]).reduce((s,r)=>s+num(r.qty)*mqPrice(q,r,v),0));
+/* trasporto: solo indicativo, NON entra nel totale */
+const mqTraspTxt=q=>q.shipAmt==null||q.shipAmt===''?(q.trasp||''):'Trasporto indicativo €. '+String(q.shipAmt).replace('.',',')+' '+(q.shipUnit==null?'a motore':q.shipUnit)+' + Iva';
+const MQ_SN={shipNote:'TRASPORTO INDICATIVO NON CONTEGGIATO SUL TOTALE',snColor:'#c00000',snFont:'Arial',snSize:15};
+const mqSN=q=>({text:q.shipNote==null?MQ_SN.shipNote:q.shipNote,color:q.snColor||MQ_SN.snColor,font:q.snFont||MQ_SN.snFont,size:num(q.snSize)||MQ_SN.snSize});
+const MQ_FONTS=['Arial','Calibri','Verdana','Tahoma','Times New Roman','Georgia','Courier New'];
+const mqTot=(q,v)=>mqSub(q,v);
+const mqModelTxt=r=>r.t!=='m'?'':'SERIE4'+(r.model==='predisp'?' predisp.':r.model==='motor'?' motoriz.':'')+(num(r.z)>0&&r.model!=='predisp'?' + leva tel.':'');
+const mqVersions=q=>q.kind==='ordine'?[q.version==='radio'?2:1]:[1,2];
+const mqVLabel=v=>v===2?'Versione PREDISPOSTO RADIO - (i telecomandi sono a parte, vedi sotto)':'VERSIONE SENZA PREDISPOSIZIONE RADIO';
+
+/* ---------- creazione ---------- */
+function mqNextNum(kind){const y=new Date().getFullYear(),L=S.mquotes.filter(x=>x.kind===kind&&String(x.number).startsWith(y+'/'));
+  return y+'/'+(kind==='ordine'?'OA':'A')+String(L.reduce((m,x)=>Math.max(m,parseInt(String(x.number).split('/')[1].replace(/\D/g,''),10)||0),0)+1).padStart(3,'0')}
+const mqEmptyRow=()=>({id:uid(),t:'m',tip:'',lf:'',lp:'',tt:'',hh:'',peso:'',p:'',z:'',y:'',s:'',model:'completo',code:'',qty:1,p1:0,p2:0});
+function mqNew(tpl,clientId){
+  const co=mqCo(tpl),cl=clientId&&byId('clients',clientId),L=cl&&co&&(cl.links||[]).find(l=>l.companyId===co.id);
+  const q={id:uid(),tpl,kind:'preventivo',number:mqNextNum('preventivo'),date:today(),status:'Bozza',companyId:co?co.id:'',clientId:clientId||'',clientName:cl?cl.name:'',
+    h:{contact:'',phone:cl?cl.phone||'':'',email:cl?cl.email||'':'',rich:'Preventivo',cantiere:''},priceMode:'listino',disc:L?L.discount||'':'',
+    rows:[mqEmptyRow()],color:'',notes:'',...MQT[tpl].notes};
+  save('mquotes',q,true);ui.mq=q.id;render();
+}
+function mqPickClient(tpl){
+  $('#modal').innerHTML=`<div class="scrim" data-act="closeModal"></div><div class="sheet"><header><h3>Nuovo preventivo · ${esc(MQT[tpl].name)}</h3><button class="x" data-act="closeModal" aria-label="Chiudi">×</button></header>
+  <p class="muted">Per chi è il preventivo? I dati e il logo del cliente si caricano da soli.</p><input id="mqCq" type="search" placeholder="Cerca cliente…" style="width:100%"><div id="mqCl" style="max-height:50vh;overflow:auto;margin-top:8px"></div>
+  <footer><button class="btn" data-act="mqNewBlank" data-tpl="${tpl}">Senza cliente</button><button class="btn ghost" data-act="closeModal">Annulla</button></footer></div>`;
+  const draw=()=>{const q=mzN($('#mqCq').value);$('#mqCl').innerHTML=S.clients.filter(c=>!isComp(c)&&(!q||mzN(c.name+' '+(c.city||'')).includes(q))).sort((a,b)=>a.name.localeCompare(b.name,'it')).slice(0,60).map(c=>`<button type="button" class="row" data-act="mqNewFor" data-tpl="${tpl}" data-id="${c.id}" style="width:100%;margin-bottom:4px"><b>${esc(c.name)}</b><span>${esc([c.city,c.prov].filter(Boolean).join(' '))}</span></button>`).join('')||'<p class="muted">Nessun cliente.</p>'};
+  $('#mqCq').oninput=draw;draw();$('#mqCq').focus();
+}
+
+/* ---------- editor ---------- */
+const mqClient=q=>byId('clients',q.clientId);
+function mqHeadVals(q){const c=mqClient(q)||{};return {az:c.name||q.clientName||'',addr:addr(c),vat:c.vat||'',phone:q.h.phone,email:q.h.email,contact:q.h.contact,date:fdate(q.date),rich:q.kind==='ordine'?'Ordine':q.h.rich,cant:q.h.cantiere}}
+function mqRowHtml(q,r,i,n){
+  const inp=(f,w,t)=>`<input data-mqf="${f}" data-i="${i}" value="${esc(r[f]==null?'':r[f])}" ${t==='n'?'inputmode="decimal"':''} style="width:${w}px">`;
+  const vs=mqVersions(q),pr=v=>`<input class="p" data-mqf="${v===2?'p2':'p1'}" data-i="${i}" value="${fix5(v===2?r.p2:r.p1)}" inputmode="decimal" title="${(v===2?r.m2:r.m1)?'Prezzo modificato a mano':'Prezzo automatico dal listino'}" style="width:86px;${(v===2?r.m2:r.m1)?'background:var(--warn-soft)':''}">`;
+  const tots=vs.map(v=>`<td class="num" id="mqT${v}_${i}"><b>${eur(num(r.qty)*mqPrice(q,r,v))}</b></td>`).join('');
+  const prs=vs.map(v=>`<td class="num">${pr(v)}</td>`).join('');
+  const del=`<td><button class="x" data-act="mqDelRow" data-i="${i}" aria-label="Elimina riga">×</button></td>`;
+  if(r.t==='d')return `<tr><td class="num muted">·</td><td colspan="11"><input data-mqf="desc" data-i="${i}" value="${esc(r.desc||'')}" placeholder="Descrizione (es. Leva per ante legate per kit a vista – versione corta, ante da 40 a 60 cm)" style="width:100%"></td><td>${inp('code',96)}</td><td>${inp('qty',50,'n')}</td>${prs}${tots}${del}</tr>`;
+  const w=mqWarn(r);
+  return `<tr><td class="num"><b>${n}</b></td><td><select data-mqf="tip" data-i="${i}" style="width:62px">${['','A','B','C'].map(t=>`<option value="${t}" ${r.tip===t?'selected':''} title="${esc(TIP[t]||'')}">${t||'—'}</option>`).join('')}</select></td>
+  <td>${inp('lf',54,'n')}</td><td>${inp('lp',54,'n')}</td><td>${inp('tt',42,'n')}</td><td>${inp('hh',54,'n')}</td><td>${inp('peso',42,'n')}</td><td>${inp('p',42,'n')}</td><td>${inp('z',42,'n')}</td><td>${inp('y',42,'n')}</td><td>${inp('s',42,'n')}</td>
+  <td><select data-mqf="model" data-i="${i}" style="width:112px">${Object.entries(MODELS).map(([k,l])=>`<option value="${k}" ${r.model===k?'selected':''}>${l}</option>`).join('')}</select></td>
+  <td><input data-mqf="code" data-i="${i}" id="mqC_${i}" value="${esc(r.code||'')}" style="width:96px;${r.codeM?'background:var(--warn-soft)':''}" title="${r.codeM?'Codice scritto a mano':'Codice automatico'}"></td><td>${inp('qty',50,'n')}</td>${prs}${tots}${del}</tr>
+  <tr class="mqw" id="mqW_${i}"><td></td><td colspan="${14+vs.length*2}" style="padding-top:0;border-top:0">${w.length?`<span style="color:var(--bad);font-size:12px">⚠ ${esc(w.join(' · '))}</span>`:''}</td></tr>`;
+}
+function mqEditor(q){
+  const cl=mqClient(q),co=byId('companies',q.companyId),vs=mqVersions(q),hv=mqHeadVals(q),T=MQT[q.tpl];
+  const ord=q.kind==='ordine';let n=0;
+  const rows=(q.rows||[]).map((r,i)=>mqRowHtml(q,r,i,r.t==='m'?++n:0)).join('');
+  const L=cl&&co&&(cl.links||[]).find(l=>l.companyId===co.id);
+  const vh=vs.map(v=>`<th class="num">Prezzo ${vs.length>1?(v===2?'radio':'senza radio'):'unit.'}</th>`).join('')+vs.map(v=>`<th class="num">Totale ${vs.length>1?(v===2?'radio':'senza radio'):''}</th>`).join('');
+  const contacts=cl?(cl.contacts||[]).map(c=>c.name).filter(Boolean):[];
+  const f=(k,l,v,extra)=>`<label class="fld"><span>${l}</span><input data-mqh="${k}" value="${esc(v||'')}" ${extra||''}></label>`;
+  return `<div class="detail"><button class="back" style="display:block" data-act="mqClose">← ${ord?'Tutti gli ordini':'Tutti i preventivi'}</button>
+  <div class="dhead"><div class="t"><h2>${ord?'Ordine':'Preventivo'} ${esc(q.number)} · ${esc(T.name)}</h2><span class="muted">${esc(co?co.name:'Antamatic')}${ord?' · '+esc(mqVLabel(vs[0])):''}</span></div>
+  <div class="acts"><select data-mqs="status" aria-label="Stato">${(ord?ORD_ST:QST).map(s=>`<option ${q.status===s?'selected':''}>${s}</option>`).join('')}</select><button class="btn pri" data-act="mqOut">📄 PDF / Excel / Invia</button>${ord?'':`<button class="btn" data-act="mqToOrder">Trasforma in ordine</button>`}<button class="btn" data-act="toggleWide">${ui.wide?'Mostra menu':'Allarga schermata'}</button><button class="btn" data-act="mqCopy">Duplica</button><button class="btn ghost danger" data-act="mqDel">Elimina</button></div></div>
+  <section class="sec"><header><h3>Cliente</h3>${cl?`<button class="btn sm" data-act="mqChClient">Cambia cliente</button>`:`<button class="btn sm pri" data-act="mqChClient">Scegli cliente</button>`}</header>
+   <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap"><img src="${MQ_DIR}logo_antamatic.png" alt="Antamatic" style="height:44px;background:#fff;border-radius:6px;padding:3px">${cl&&logoSrc(cl)?`<img src="${esc(logoSrc(cl))}" alt="Logo cliente" style="height:44px;background:#fff;border-radius:6px;padding:3px">`:`<span class="muted">${cl?'Il cliente non ha un logo: aggiungilo dalla sua scheda (Modifica → logo, anche incollandolo).':''}</span>`}</div>
+   <div class="grid" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+    <label class="fld"><span>Azienda</span><input value="${esc(hv.az)}" ${cl?'readonly':''} data-mqh="clientName"></label>${f('phone','Telefono',q.h.phone)}<label class="fld"><span>Data</span><input type="date" data-mqd="date" value="${esc(q.date)}"></label>
+    <label class="fld"><span>Indirizzo</span><input value="${esc(hv.addr)}" readonly></label>${f('email','e-mail',q.h.email)}<label class="fld"><span>Richiesta</span>${ord?'<input value="Ordine" readonly>':`<select data-mqh="rich">${['Preventivo','Ordine'].map(x=>`<option ${q.h.rich===x?'selected':''}>${x}</option>`).join('')}</select>`}</label>
+    <label class="fld"><span>P.Iva</span><input value="${esc(hv.vat)}" readonly></label><label class="fld"><span>Persona di contatto</span><input data-mqh="contact" list="mqCts" value="${esc(q.h.contact||'')}" placeholder="Scegli o scrivi"><datalist id="mqCts">${contacts.map(x=>`<option value="${esc(x)}">`).join('')}</datalist></label>${f('cantiere','Rif. Cantiere',q.h.cantiere)}
+   </div></section>
+  <section class="sec"><header><h3>Righe</h3><div class="acts">
+    <label class="muted" style="display:flex;gap:6px;align-items:center">Prezzi <select data-mqs="priceMode"><option value="listino" ${q.priceMode!=='netto'?'selected':''}>di listino</option><option value="netto" ${q.priceMode==='netto'?'selected':''}>netti cliente</option></select></label>${q.priceMode==='netto'?`<label class="muted" style="display:flex;gap:6px;align-items:center">sconto <input data-mqs="disc" value="${esc(q.disc||'')}" placeholder="es. 40+10" style="width:80px"></label>`:''}
+    <button class="btn sm pri" data-act="mqAddRow">+ Riga misure</button><button class="btn sm" data-act="mqAddDesc">+ Riga descrittiva</button><button class="btn sm" data-act="mqAcc">+ Accessorio (con foto)</button>
+    <span style="display:inline-flex;gap:4px"><input id="mqCode" placeholder="Aggiungi per codice" style="width:150px"><button class="btn sm" data-act="mqAddCode">Aggiungi</button></span></div></header>
+   <p class="muted" style="margin:0">Scrivi tipologia e misure: modello, codice e prezzo si compilano da soli. Prezzo e codice si possono sempre correggere a mano (diventano gialli). Misure in mm; peso totale delle ante in kg.</p>
+   <div class="tw"><table class="mqt" style="min-width:1100px"><thead><tr><th>#</th><th title="A mono anta destro · B mono anta sinistro · C doppia anta">Tip.</th><th>LF luce foro</th><th>LP luce pass.</th><th>T telaio</th><th>H altezza</th><th>Peso ante kg</th><th>P prof.</th><th>Z bandella</th><th>Y lamelle</th><th>S spess.</th><th>Modello</th><th>Codice</th><th>Q.tà</th>${vh}<th></th></tr></thead><tbody id="mqRows">${rows}</tbody></table></div>
+   <div style="display:flex;gap:20px;flex-wrap:wrap;justify-content:space-between;align-items:flex-start">
+    <div class="card" style="min-width:300px;max-width:520px"><b>Trasporto indicativo</b><span class="muted" style="font-size:12px">Non viene conteggiato nel totale.</span>
+     <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">Trasporto indicativo €. <input data-mqs="shipAmt" inputmode="decimal" value="${esc(q.shipAmt==null?'20':q.shipAmt)}" style="width:70px"> <input data-mqs="shipUnit" value="${esc(q.shipUnit==null?'a motore':q.shipUnit)}" style="width:120px"> + Iva</div></div>
+    <div class="totals" style="min-width:320px">${vs.map(v=>`<div class="g"><span>Totale ${vs.length>1?(v===2?'predisposto radio':'senza radio'):''}</span><span id="mqTot${v}">${eur(mqTot(q,v))}</span></div>`).join('')}</div></div></section>
+  <section class="sec"><header><h3>Note e colore</h3></header>
+   <div class="grid"><label class="fld full"><span>Colore scelto dal cliente (va nelle NOTE del preventivo e dell'ordine)</span><input data-mqs="color" value="${esc(q.color||'')}" list="mqCol" placeholder="es. Grigio scuro RAL7016 opaco – GS"><datalist id="mqCol">${['BIANCO opaco','MARRONE RUGGINE raggrinzato – MR','GRIGIO CHIARO RAL7035 opaco – GC','GRIGIO SCURO RAL7016 opaco – GS','VERDE MUSCHIO RAL6005 opaco – VM'].map(x=>`<option value="${x}">`).join('')}</datalist></label>
+   <label class="fld full"><span>Note</span><textarea data-mqs="notes" rows="2">${esc(q.notes||'')}</textarea></label>
+   <div class="fld full"><span>Nota sul trasporto (nelle NOTE) – testo, colore, carattere e grandezza</span>${(()=>{const n=mqSN(q);return `<input data-mqs="shipNote" value="${esc(n.text)}" placeholder="Lascia vuoto per non stamparla"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px">Colore <input type="color" data-mqs="snColor" value="${esc(n.color)}" style="width:44px;padding:0;height:30px"> Carattere <select data-mqs="snFont">${MQ_FONTS.map(f=>`<option ${n.font===f?'selected':''} style="font-family:${f}">${f}</option>`).join('')}</select> Grandezza <input type="number" min="7" max="40" data-mqs="snSize" value="${n.size}" style="width:64px"></div><div id="mqSnPrev" style="margin-top:6px;font-weight:bold;color:${esc(n.color)};font-family:${esc(n.font)};font-size:${n.size}px;background:#fff;padding:4px 8px;border-radius:6px">${esc(n.text)}</div>`})()}</div>
+   ${['noteA','noteB','noteC'].map(k=>`<label class="fld full"><span>${({noteA:'Nota sotto la tabella',noteB:'Nota colore automazione',noteC:'Avvertenza (nelle NOTE)'})[k]}</span><input data-mqs="${k}" value="${esc(q[k]||'')}"></label>`).join('')}</div>
+   <img src="${MQ_DIR}colori.jpg" alt="Varianti di colore standard" style="max-width:520px;width:100%;background:#fff;border-radius:6px;margin-top:6px"></section></div>`;
+}
+document.head.insertAdjacentHTML('beforeend','<style>.mqt th{font-size:10.5px;padding:6px 4px;white-space:normal;line-height:1.2}.mqt td{padding:3px 2px}.mqt input,.mqt select{padding:4px 5px;font-size:13px}.mqt tr.mqw td{padding:0 2px 4px}</style>');
+function mqSnPrev(q){const e=$('#mqSnPrev');if(!e)return;const n=mqSN(q);e.textContent=n.text;e.style.color=n.color;e.style.fontFamily=n.font;e.style.fontSize=n.size+'px'}
+const mqSave=debounce(()=>{const q=MQ();if(q)save('mquotes',q,true)},600);
+function mqPatch(q){
+  mqRecalc(q);let n=0;
+  (q.rows||[]).forEach((r,i)=>{
+    mqVersions(q).forEach(v=>{const t=$('#mqT'+v+'_'+i);if(t)t.innerHTML='<b>'+eur(num(r.qty)*mqPrice(q,r,v))+'</b>';const p=document.querySelector(`[data-mqf="${v===2?'p2':'p1'}"][data-i="${i}"]`);if(p&&document.activeElement!==p)p.value=fix5(v===2?r.p2:r.p1)});
+    const c=$('#mqC_'+i);if(c&&document.activeElement!==c)c.value=r.code||'';
+    const w=$('#mqW_'+i);if(w){const L=mqWarn(r);w.lastElementChild.innerHTML=L.length?`<span style="color:var(--bad);font-size:12px">⚠ ${esc(L.join(' · '))}</span>`:''}
+  });
+  mqVersions(q).forEach(v=>{const t=$('#mqTot'+v);if(t)t.textContent=eur(mqTot(q,v));});
+
+}
+document.addEventListener('input',e=>{
+  const t=e.target,q=MQ();if(!q||!t.dataset)return;
+  if(t.dataset.mqf){const r=q.rows[+t.dataset.i],f=t.dataset.mqf;if(!r)return;
+    if(f==='p1'||f==='p2'){r[f]=num(t.value);r[f==='p1'?'m1':'m2']=true;t.style.background='var(--warn-soft)'}
+    else if(f==='code'){r.code=t.value.trim();if(r.t==='m'){r.codeM=!!r.code&&r.code!==mqAuto(r).code;t.style.background=r.codeM?'var(--warn-soft)':''}}
+    else r[f]=t.value;
+    if(f!=='tip'&&f!=='model'){mqPatch(q);mqSave()}}
+  else if(t.dataset.mqh){q.h=q.h||{};if(t.dataset.mqh==='clientName')q.clientName=t.value;else q.h[t.dataset.mqh]=t.value;mqSave()}
+  else if(t.dataset.mqs&&t.tagName!=='SELECT'){q[t.dataset.mqs]=t.value;if(t.dataset.mqs==='disc')mqPatch(q);if(/^sn|shipNote/.test(t.dataset.mqs))mqSnPrev(q);mqSave()}
+  else if(t.dataset.mqd){q[t.dataset.mqd]=t.value;mqSave()}
+});
+document.addEventListener('change',e=>{
+  const t=e.target,q=MQ();if(!q||!t.dataset)return;
+  if(t.dataset.mqf==='tip'||t.dataset.mqf==='model'){const r=q.rows[+t.dataset.i];r[t.dataset.mqf]=t.value;r.codeM=false;r.m1=r.m2=false;mqRecalc(q);save('mquotes',q,true);render()}
+  else if(t.dataset.mqs==='snFont'){q.snFont=t.value;mqSnPrev(q);mqSave()}
+  else if(t.dataset.mqs&&t.tagName==='SELECT'){q[t.dataset.mqs]=t.value;if(t.dataset.mqs==='priceMode'){(q.rows||[]).forEach(r=>{if(r.t==='m'){r.m1=r.m2=false}});const cl=mqClient(q),L=cl&&(cl.links||[]).find(l=>l.companyId===q.companyId);if(t.value==='netto'&&!q.disc&&L)q.disc=L.discount||''}mqRecalc(q);save('mquotes',q,true);render()}
+  else if(t.dataset.mqh==='rich'){q.h.rich=t.value;mqSave()}
+});
+function mqAccPicker(){
+  const gs=[...new Set(ANT.acc.map(a=>a.g))];
+  $('#modal').innerHTML=`<div class="scrim" data-act="closeModal"></div><div class="sheet" style="width:min(860px,calc(100% - 24px))"><header><h3>Accessori Antamatic</h3><button class="x" data-act="closeModal" aria-label="Chiudi">×</button></header>
+  <p class="muted">Le foto servono solo a te per scegliere: nel preventivo va la riga con descrizione, codice e prezzo.</p>
+  ${gs.map(g=>`<h5>${esc(g)}</h5><div class="cards" style="grid-template-columns:repeat(auto-fill,minmax(190px,1fr))">${ANT.acc.filter(a=>a.g===g).map(a=>`<button type="button" class="card" data-act="mqAccAdd" data-code="${a.code}" style="cursor:pointer;text-align:left"><img src="${MQ_DIR}acc/${a.img}.jpg" alt="" style="width:100%;height:110px;object-fit:contain;background:#fff;border-radius:6px"><b style="font-size:13px">${esc(a.desc)}</b><span class="muted">art. ${a.code} · ${eur(a.price)}</span></button>`).join('')}</div>`).join('')}
+  <footer><button class="btn ghost" data-act="closeModal">Chiudi</button></footer></div>`;
+}
+function mqAddAcc(q,code,qty){
+  const a=ANT.acc.find(x=>x.code===String(code).trim());
+  const it=!a&&S.items.find(i=>i.companyId===q.companyId&&String(i.code).toLowerCase()===String(code).trim().toLowerCase());
+  if(!a&&!it&&!ANT.kit[code])return false;
+  const price=r5((a?a.price:it?it.price:ANT.kit[code])*mqDisc(q));
+  q.rows.push({id:uid(),t:'d',desc:a?a.desc:it?it.name:'Articolo '+code,code:String(code).trim(),qty:qty||1,lst:a?a.price:it?it.price:ANT.kit[code],p1:price,p2:price});
+  return true;
+}
+Object.assign(ACT,{
+  mqNewTpl:d=>mqPickClient(d.tpl),
+  mqNewFor:d=>{closeModal();mqNew(d.tpl,d.id)},
+  mqNewBlank:d=>{closeModal();mqNew(d.tpl,'')},
+  mqOpen:d=>{ui.mq=d.id;render();$('#app').scrollTop=0},
+  mqClose:()=>{ui.mq=null;render()},
+  mqAddRow:()=>{const q=MQ();q.rows.push(mqEmptyRow());save('mquotes',q,true);render()},
+  mqAddDesc:()=>{const q=MQ();q.rows.push({id:uid(),t:'d',desc:'',code:'',qty:1,p1:0,p2:0,m1:true,m2:true});save('mquotes',q,true);render();const L=document.querySelectorAll('[data-mqf="desc"]');L.length&&L[L.length-1].focus()},
+  mqDelRow:d=>{const q=MQ();q.rows.splice(+d.i,1);save('mquotes',q,true);render()},
+  mqAcc:()=>mqAccPicker(),
+  mqAccAdd:d=>{const q=MQ();mqAddAcc(q,d.code);closeModal();save('mquotes',q,true);render();toast('Aggiunto: art. '+d.code)},
+  mqAddCode:()=>{const q=MQ(),c=$('#mqCode').value.trim();if(!c)return;if(mqAddAcc(q,c)){save('mquotes',q,true);render();toast('Aggiunto: art. '+c)}else{q.rows.push({id:uid(),t:'d',desc:'',code:c,qty:1,p1:0,p2:0,m1:true,m2:true});save('mquotes',q,true);render();toast('Codice non a listino: scrivi descrizione e prezzo')}},
+  mqChClient:()=>{const q=MQ();$('#modal').innerHTML=`<div class="scrim" data-act="closeModal"></div><div class="sheet"><header><h3>Scegli il cliente</h3><button class="x" data-act="closeModal" aria-label="Chiudi">×</button></header><input id="mqCq" type="search" placeholder="Cerca cliente…" style="width:100%"><div id="mqCl" style="max-height:50vh;overflow:auto;margin-top:8px"></div></div>`;
+    const draw=()=>{const s=mzN($('#mqCq').value);$('#mqCl').innerHTML=S.clients.filter(c=>!isComp(c)&&(!s||mzN(c.name+' '+(c.city||'')).includes(s))).sort((a,b)=>a.name.localeCompare(b.name,'it')).slice(0,60).map(c=>`<button type="button" class="row" data-act="mqSetClient" data-id="${c.id}" style="width:100%;margin-bottom:4px"><b>${esc(c.name)}</b><span>${esc([c.city,c.prov].filter(Boolean).join(' '))}</span></button>`).join('')};$('#mqCq').oninput=draw;draw();$('#mqCq').focus()},
+  mqSetClient:d=>{const q=MQ(),c=byId('clients',d.id);q.clientId=c.id;q.clientName=c.name;q.h.phone=q.h.phone||c.phone||'';q.h.email=q.h.email||c.email||'';const L=(c.links||[]).find(l=>l.companyId===q.companyId);if(L&&!q.disc)q.disc=L.discount||'';closeModal();mqRecalc(q);save('mquotes',q,true);render()},
+  mqDel:()=>{const q=MQ();confirmBox('Eliminare '+(q.kind==='ordine'?"l'ordine":'il preventivo')+' '+esc(q.number)+'?',async()=>{await remove('mquotes',q.id,true);ui.mq=null;render()})},
+  mqCopy:async()=>{const q=MQ(),c=JSON.parse(JSON.stringify(q));Object.assign(c,{id:uid(),kind:'preventivo',number:mqNextNum('preventivo'),date:today(),status:'Bozza',fromId:''});delete c.version;await save('mquotes',c,true);ui.view='preventivi';ui.mq=c.id;render();toast('Copia creata: '+c.number)},
+  mqToOrder:()=>{const q=MQ();
+    $('#modal').innerHTML=`<div class="scrim" data-act="closeModal"></div><div class="sheet"><header><h3>Trasforma in ordine</h3><button class="x" data-act="closeModal" aria-label="Chiudi">×</button></header>
+    <p>Quale versione ha confermato il cliente?</p><div class="acts"><button class="btn pri" data-act="mqOrdGo" data-v="1">Senza predisposizione radio (${eur(mqTot(q,1))})</button><button class="btn pri" data-act="mqOrdGo" data-v="2">Predisposto radio (${eur(mqTot(q,2))})</button></div>
+    <p class="muted">Nell'ordine potrai aggiungere i radiocomandi scelti scrivendo il codice, e il colore resta nelle note.</p></div>`},
+  mqOrdGo:async d=>{const q=MQ(),v=+d.v,o=JSON.parse(JSON.stringify(q));
+    Object.assign(o,{id:uid(),kind:'ordine',version:v===2?'radio':'senza',number:mqNextNum('ordine'),date:today(),status:'Da evadere',fromId:q.id});o.h.rich='Ordine';
+    o.rows.forEach(r=>{const p=v===2?r.p2:r.p1,m=v===2?r.m2:r.m1;r.p1=r.p2=p;r.m1=r.m2=!!m});
+    closeModal();await save('mquotes',o,true);await save('mquotes',{...q,status:'Accettato'},true);ui.view='ordini';ui.mq=o.id;render();toast('Ordine '+o.number+' creato')},
+  mqOut:()=>mqOutModal()
+});
+/* nell'ordine il prezzo è uno solo: modificando p1 si aggiorna anche p2 */
+document.addEventListener('input',e=>{const t=e.target,q=MQ();if(q&&q.kind==='ordine'&&t.dataset&&(t.dataset.mqf==='p1'||t.dataset.mqf==='p2')){const r=q.rows[+t.dataset.i];r.p1=r.p2=num(t.value);r.m1=r.m2=true}},true);
+
+/* ---------- elenco: cartelle per azienda in Preventivi e Ordini ---------- */
+const mqRow=q=>{const cl=mqClient(q),vs=mqVersions(q);return `<button class="row" data-act="mqOpen" data-id="${q.id}"><div class="r2"><b>${q.kind==='ordine'?'Ord. ':'N. '}${esc(q.number)} · ${esc(cl?cl.name:q.clientName||'Cliente non scelto')}</b><span class="pill ${qCls(q.status)}">${esc(q.status)}</span></div><div class="r2"><span>${esc(MQT[q.tpl].name)} · ${fdate(q.date)}${q.color?' · '+esc(q.color):''}</span><b>${vs.map(v=>eur(mqTot(q,v))).join(' / ')}</b></div></button>`};
+const _qlMQ=quotesList;
+quotesList=function(){
+  const ord=ui.view==='ordini',kind=ord?'ordine':'preventivo';
+  const cos=S.companies.filter(c=>Object.keys(MQT).some(t=>MQT[t].co.test(c.name))||S.quotes.some(q=>q.companyId===c.id)||S.mquotes.some(q=>q.companyId===c.id)).sort((a,b)=>a.name.localeCompare(b.name,'it'));
+  if(ui.qco&&!byId('companies',ui.qco))ui.qco='';
+  const tabs=`<div class="acts" style="margin-bottom:10px;gap:4px"><button class="btn sm ${!ui.qco?'pri':''}" data-act="qcoTab" data-id="">Tutte le aziende</button>${cos.map(c=>`<button class="btn sm ${ui.qco===c.id?'pri':''}" data-act="qcoTab" data-id="${c.id}">${esc(c.name)}</button>`).join('')}</div>`;
+  const tpls=Object.keys(MQT).filter(t=>{const c=mqCo(t);return c&&(!ui.qco||ui.qco===c.id)});
+  const M=S.mquotes.filter(q=>q.kind===kind&&(!ui.qco||q.companyId===ui.qco)&&(!ui.status||q.status===ui.status)).sort((a,b)=>(b.date||'').localeCompare(a.date||'')||String(b.number).localeCompare(String(a.number)));
+  const qq=(ui.q||'').trim().toLowerCase(),M2=M.filter(q=>!qq||[q.number,(mqClient(q)||{}).name,q.clientName,q.color].some(v=>String(v||'').toLowerCase().includes(qq)));
+  const mods=!ord&&tpls.length?`<section class="sec" style="margin-bottom:12px"><header><h3>Modelli di preventivo</h3></header><div class="acts">${tpls.map(t=>`<button class="btn pri" data-act="mqNewTpl" data-tpl="${t}">+ ${esc(mqCo(t).name.split(/\s*\(/)[0])} · ${esc(MQT[t].name)}</button>`).join('')}</div><p class="muted" style="margin:0">Il modulo dell'azienda con il rilievo quote: prezzi automatici dal listino, modificabili.</p></section>`:'';
+  const ml=M2.length?`<h5>${ord?'Ordini da modello':'Preventivi da modello'}</h5><div class="list" style="margin-bottom:12px">${M2.map(mqRow).join('')}</div>`:'';
+  const all=S.quotes;if(ui.qco)S.quotes=all.filter(q=>q.companyId===ui.qco);let h;try{h=_qlMQ()}finally{S.quotes=all}
+  return tabs+mods+ml+(M2.length?'<h5>Preventivi e ordini classici</h5>':'')+h;
+};
+ACT.qcoTab=d=>{ui.qco=d.id;render()};
+function mqDecorate(){
+  if((ui.view==='preventivi'||ui.view==='ordini')&&ui.mq){const q=MQ();if(!q){ui.mq=null;return}
+    $('#title').textContent=(q.kind==='ordine'?'Ordine':'Preventivo')+' · '+MQT[q.tpl].name;$('#searchBox').innerHTML='';$('#topAct').innerHTML='';
+    document.querySelector('.shell').classList.toggle('wide',!!ui.wide);const w=$('#app'),st=w.scrollTop;w.innerHTML=mqEditor(q);w.scrollTop=st}
+}
+
+/* ---------- PDF, Excel e invio del preventivo da modello ---------- */
+async function mqFetchBytes(p){const r=await fetch(p);if(!r.ok)throw new Error('File mancante: '+p);return new Uint8Array(await r.arrayBuffer())}
+const mqB64=u8=>{let s='';for(let i=0;i<u8.length;i+=32768)s+=String.fromCharCode.apply(null,u8.subarray(i,i+32768));return btoa(s)};
+async function mqDataUrl(p,type){return 'data:'+type+';base64,'+mqB64(await mqFetchBytes(p))}
+async function mqImgDims(src){const im=new Image();await new Promise((a,b)=>{im.onload=a;im.onerror=b;im.src=src});return [im.naturalWidth,im.naturalHeight]}
+/* immagine qualsiasi (anche webp/svg) -> PNG */
+async function mqToPng(src){if(!src)return null;const im=new Image();im.crossOrigin='anonymous';await new Promise((a,b)=>{im.onload=a;im.onerror=b;im.src=src});
+  const c=document.createElement('canvas');c.width=im.naturalWidth;c.height=im.naturalHeight;const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.drawImage(im,0,0);
+  const b=await new Promise(r=>c.toBlob(r,'image/png'));return {u8:new Uint8Array(await b.arrayBuffer()),w:c.width,h:c.height,url:c.toDataURL('image/png')}}
+async function mqAssets(q){
+  const cl=mqClient(q),A={};
+  A.logo=await mqToPng(MQ_DIR+'logo_antamatic.png');
+  A.client=cl&&logoSrc(cl)?await mqToPng(await toDataUri(logoSrc(cl))).catch(()=>null):null;
+  A.colori=await mqToPng(MQ_DIR+'colori.jpg');
+  return A;
+}
+const MQ_PAGES=q=>q.kind==='ordine'?['Q'+mqVersions(q)[0],'rilievo_tipologie','rilievo_range']:['Q1','rilievo_tipologie','rilievo_range','Q2','radiocomandi_1','radiocomandi_2'];
+
+/* pagina del preventivo in HTML (A4 orizzontale, 1123×794) */
+function mqPageHtml(q,v,A){
+  const hv=mqHeadVals(q),T=MQT[q.tpl];let n=0;
+  const cell=x=>esc(x==null?'':String(x));
+  const rows=(q.rows||[]).map(r=>{const p=mqPrice(q,r,v),tot=num(r.qty)*p;
+    if(r.t==='d')return `<tr><td></td><td colspan="11" class="l">${cell(r.desc)}</td><td>${cell(r.code)}</td><td>${cell(r.qty)}</td><td class="r">${p?eurp(p):''}</td><td class="r">${tot?eur(tot):''}</td></tr>`;
+    n++;return `<tr><td>${n}</td><td>${cell(r.tip)}</td><td>${cell(r.lf)}</td><td>${cell(r.lp)}</td><td>${cell(r.tt)}</td><td>${cell(r.hh)}</td><td>${cell(r.peso)}</td><td>${cell(r.p)}</td><td>${cell(r.z)}</td><td>${cell(r.y)}</td><td>${cell(r.s)}</td><td>${cell(mqModelTxt(r))}</td><td>${cell(r.code)}</td><td>${cell(r.qty)}</td><td class="r">${p?eurp(p):''}</td><td class="r">${tot?eur(tot):''}</td></tr>`}).join('');
+  const empty=Math.max(0,4-(q.rows||[]).length);const pad=Array.from({length:empty},()=>'<tr>'+'<td>&nbsp;</td>'.repeat(16)+'</tr>').join('');
+  const inf=(l,x)=>`<td class="lb">${l}</td><td class="vl">${cell(x)}</td>`;
+  const noteTxt=[q.noteC,q.color?'Colore scelto dal cliente: '+q.color:'',q.notes].filter(Boolean);
+  return `<div class="pg"><div class="hd"><img class="lg" src="${A.logo.url}"><div class="ti">${cell(T.title)}${q.kind==='ordine'?' · ORDINE':''}</div>${A.client?`<img class="lg r" src="${A.client.url}">`:'<span></span>'}</div>
+  <table class="inf"><tr>${inf('Azienda',hv.az)}${inf('Telefono',hv.phone)}${inf('Data',hv.date)}</tr><tr>${inf('Indirizzo',hv.addr)}${inf('e-mail',hv.email)}${inf('Richiesta',hv.rich+' n. '+q.number)}</tr><tr>${inf('P.Iva',hv.vat)}${inf('Persona di contatto',hv.contact)}${inf('Rif. Cantiere',hv.cant)}</tr></table>
+  <table class="rq"><thead><tr><th rowspan="2"></th><th rowspan="2">tipologia di apertura (A-B-C)</th><th colspan="9">dimensioni (mm)</th><th colspan="3">prodotto</th><th rowspan="2">Prezzo Unitario</th><th rowspan="2">TOTALE</th></tr>
+  <tr><th>LF= luce foro</th><th>LP= luce passaggio</th><th>T= telaio</th><th>H= altezza foro</th><th>peso ante kg</th><th>P= profondità utile</th><th>Z= bandella zancata</th><th>Y= persiana lamelle</th><th>S= spessore anta</th><th>modello</th><th>codice</th><th>quantità</th></tr></thead><tbody>${rows}${pad}</tbody></table>
+  <div class="nt">${cell(q.noteA)}</div><div class="nt">${cell(q.noteB)}</div>
+  <div class="bt"><div class="col"><img src="${A.colori.url}"><div class="vr">${cell(mqVLabel(v))}</div></div><div class="sum"><div>${cell(mqTraspTxt(q))}</div><div class="tt"><span>TOTALE:</span><span>${eur(mqTot(q,v))}</span></div><div class="pl">${q.priceMode==='netto'?'PREZZI NETTI ESCLUSA IVA':'PREZZI DI LISTINO ESCLUSA IVA'}</div></div></div>
+  <div class="no"><b>NOTE:</b> ${noteTxt.map(cell).join('<br>')}${(()=>{const n=mqSN(q);return n.text?`<div style="color:${esc(n.color)};font-family:${esc(n.font)};font-size:${n.size}px;font-weight:bold;margin-top:3px">${cell(n.text)}</div>`:''})()}</div></div>`;
+}
+const MQ_CSS=`.pg{width:1123px;height:794px;box-sizing:border-box;padding:26px 30px;background:#fff;color:#111;font:11px Arial,Helvetica,sans-serif;display:flex;flex-direction:column;gap:7px}
+.hd{display:grid;grid-template-columns:200px 1fr 200px;align-items:center;gap:10px}.lg{max-height:62px;max-width:200px;object-fit:contain}.lg.r{justify-self:end}.ti{text-align:center;font:bold 20px Arial;letter-spacing:.02em}
+table{border-collapse:collapse;width:100%}.inf td{border:1px solid #999;padding:4px 6px;height:18px}.inf .lb{background:#eef0f0;font-weight:bold;width:9%;white-space:nowrap}.inf .vl{width:24%}
+.rq th{border:1px solid #777;background:#e8eceb;font-size:9.5px;padding:3px;text-align:center;font-weight:bold}.rq td{border:1px solid #999;padding:4px 3px;text-align:center;height:17px;font-size:11px}.rq td.l{text-align:left}.rq td.r{text-align:right;white-space:nowrap}
+.nt{font-weight:bold;font-size:11px}.bt{display:grid;grid-template-columns:1fr 330px;gap:16px;align-items:start}.col img{width:100%;max-width:560px}.vr{font-weight:bold;font-size:13px;margin-top:4px}
+.sum div{padding:3px 0}.sum .ln{display:flex;justify-content:space-between;font-size:12px}.tt{display:flex;justify-content:space-between;font:bold 17px Arial;border-top:2px solid #111;border-bottom:2px solid #111;padding:6px 0!important}.pl{font-weight:bold;text-align:right}
+.no{border:1px solid #999;padding:6px 8px;min-height:40px;color:#a40000;font-weight:bold}`;
+async function mqRenderPage(html){
+  const host=document.createElement('div');host.style.cssText='position:fixed;left:-14000px;top:0;width:1123px;background:#fff';
+  host.innerHTML='<style>'+MQ_CSS+'</style>'+html;document.body.appendChild(host);
+  try{const clone=host.cloneNode(true);clone.setAttribute('style','width:1123px;background:#fff');clone.setAttribute('xmlns','http://www.w3.org/1999/xhtml');
+    const svg='<svg xmlns="http://www.w3.org/2000/svg" width="1123" height="794"><foreignObject x="0" y="0" width="1123" height="794">'+new XMLSerializer().serializeToString(clone)+'</foreignObject></svg>';
+    const img=new Image();await new Promise((a,b)=>{img.onload=a;img.onerror=()=>b(new Error('render'));img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg)});
+    const S2=2,c=document.createElement('canvas');c.width=1123*S2;c.height=794*S2;const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.drawImage(img,0,0,c.width,c.height);
+    const d=atob(c.toDataURL('image/jpeg',0.9).split(',')[1]),u=new Uint8Array(d.length);for(let i=0;i<d.length;i++)u[i]=d.charCodeAt(i);
+    return {jpg:u,w:c.width,h:c.height,land:true}}finally{host.remove()}
+}
+/* PDF con pagine di formato diverso (orizzontali e verticali) */
+function mqPdf(pages){
+  const enc=new TextEncoder(),parts=[],off=[];let len=0;const push=b=>{if(typeof b==='string')b=enc.encode(b);parts.push(b);len+=b.length};
+  const obj=(n,fn)=>{off[n]=len;push(n+' 0 obj\n');fn();push('\nendobj\n')};const n=pages.length;
+  push('%PDF-1.4\n');obj(1,()=>push('<< /Type /Catalog /Pages 2 0 R >>'));
+  obj(2,()=>push('<< /Type /Pages /Count '+n+' /Kids ['+pages.map((_,i)=>(3+3*i)+' 0 R').join(' ')+'] >>'));
+  pages.forEach((p,i)=>{const a=3+3*i,W=p.land?841.89:595.28,H=p.land?595.28:841.89,k=Math.min(W/p.w,H/p.h),iw=p.w*k,ih=p.h*k,x0=(W-iw)/2,y0=(H-ih)/2;
+    obj(a,()=>push('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 '+W+' '+H+'] /Resources << /XObject << /Im0 '+(a+2)+' 0 R >> >> /Contents '+(a+1)+' 0 R >>'));
+    const cs='q '+iw.toFixed(2)+' 0 0 '+ih.toFixed(2)+' '+x0.toFixed(2)+' '+y0.toFixed(2)+' cm /Im0 Do Q';
+    obj(a+1,()=>push('<< /Length '+cs.length+' >>\nstream\n'+cs+'\nendstream'));
+    obj(a+2,()=>{push('<< /Type /XObject /Subtype /Image /Width '+p.w+' /Height '+p.h+' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length '+p.jpg.length+' >>\nstream\n');push(p.jpg);push('\nendstream')})});
+  const xr=len,total=3+3*n;push('xref\n0 '+total+'\n0000000000 65535 f \n');for(let i=1;i<total;i++)push(String(off[i]).padStart(10,'0')+' 00000 n \n');
+  push('trailer\n<< /Size '+total+' /Root 1 0 R >>\nstartxref\n'+xr+'\n%%EOF');
+  const out=new Uint8Array(len);let o=0;parts.forEach(b=>{out.set(b,o);o+=b.length});return out;
+}
+async function mqPdfFile(q){
+  const A=await mqAssets(q),pages=[];
+  for(const k of MQ_PAGES(q)){
+    if(k[0]==='Q'&&k.length===2)pages.push(await mqRenderPage(mqPageHtml(q,+k[1],A)));
+    else{const u=await mqFetchBytes(MQ_DIR+k+'.jpg'),[w,h]=await mqImgDims(URL.createObjectURL(new Blob([u],{type:'image/jpeg'})));pages.push({jpg:u,w,h,land:w>h})}
+  }
+  return new File([mqPdf(pages)],mqFileName(q)+'.pdf',{type:'application/pdf'});
+}
+const mqFileName=q=>(q.kind==='ordine'?'Ordine_':'Preventivo_')+String(q.number).replace(/[\\/:*?"<>|]/g,'-')+'_Antamatic_ante_battente'+((mqClient(q)||{}).name?'_'+mqClient(q).name.replace(/[^\w]+/g,'_').slice(0,30):'');
+
+/* ---------- Excel (.xlsx) scritto direttamente, con loghi e immagini ---------- */
+const CRC=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0}return u=>{let c=0xFFFFFFFF;for(let i=0;i<u.length;i++)c=t[(c^u[i])&255]^(c>>>8);return (c^0xFFFFFFFF)>>>0}})();
+function mqZip(files){
+  const enc=new TextEncoder(),out=[],cd=[];let off=0;
+  const u16=v=>[v&255,(v>>8)&255],u32=v=>[v&255,(v>>8)&255,(v>>16)&255,(v>>>24)&255];
+  for(const f of files){const name=enc.encode(f.name),data=typeof f.data==='string'?enc.encode(f.data):f.data,crc=CRC(data);
+    const h=new Uint8Array([0x50,0x4b,3,4,...u16(20),...u16(0x0800),...u16(0),...u16(0),...u16(0x21),...u32(crc),...u32(data.length),...u32(data.length),...u16(name.length),...u16(0)]);
+    out.push(h,name,data);cd.push({name,crc,size:data.length,off});off+=h.length+name.length+data.length}
+  const start=off;
+  for(const c of cd){const h=new Uint8Array([0x50,0x4b,1,2,...u16(20),...u16(20),...u16(0x0800),...u16(0),...u16(0),...u16(0x21),...u32(c.crc),...u32(c.size),...u32(c.size),...u16(c.name.length),...u16(0),...u16(0),...u16(0),...u16(0),...u32(0),...u32(c.off)]);out.push(h,c.name);off+=h.length+c.name.length}
+  out.push(new Uint8Array([0x50,0x4b,5,6,0,0,0,0,...u16(cd.length),...u16(cd.length),...u32(off-start),...u32(start),0,0]));
+  const tot=out.reduce((s,b)=>s+b.length,0),r=new Uint8Array(tot);let o=0;out.forEach(b=>{r.set(b,o);o+=b.length});return r;
+}
+const xe=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g,'');
+const colL=c=>{let s='';c++;while(c){const m=(c-1)%26;s=String.fromCharCode(65+m)+s;c=Math.floor((c-1)/26)}return s};
+const MQ_STYLES=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="&quot;€&quot; #,##0.00"/></numFmts>
+<fonts count="5"><font><sz val="10"/><name val="Arial"/></font><font><b/><sz val="10"/><name val="Arial"/></font><font><b/><sz val="16"/><name val="Arial"/></font><font><b/><sz val="8"/><name val="Arial"/></font><font><b/><sz val="10"/><color rgb="FFA40000"/><name val="Arial"/></font></fonts>
+<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE8ECEB"/><bgColor indexed="64"/></patternFill></fill></fills>
+<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FF888888"/></left><right style="thin"><color rgb="FF888888"/></right><top style="thin"><color rgb="FF888888"/></top><bottom style="thin"><color rgb="FF888888"/></bottom><diagonal/></border></borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="12">
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"><alignment vertical="center"/></xf>
+<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"><alignment vertical="center"/></xf>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1"><alignment vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="3" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+<xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1"><alignment vertical="center"/></xf>
+<xf numFmtId="164" fontId="1" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"><alignment vertical="center"/></xf>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"><alignment vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"><alignment vertical="center"/></xf>
+<xf numFmtId="0" fontId="4" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1"><alignment vertical="top" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1"><alignment horizontal="left" vertical="center" wrapText="1"/></xf>
+</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
+async function mqXlsxFile(q){
+  const A=await mqAssets(q),hv=mqHeadVals(q),T=MQT[q.tpl];
+  const rows={},merges=[],breaks=[],imgs=[],heights={};let R=0;
+  const put=(r,c,v,s,f)=>{(rows[r]=rows[r]||{})[c]={v,s,f}};
+  const mg=(r1,c1,r2,c2)=>merges.push(colL(c1)+(r1+1)+':'+colL(c2)+(r2+1));
+  const PXW=1010;/* larghezza utile in pixel delle colonne A..P */
+  const pic=(r,c,img,w,h,type)=>imgs.push({r,c,img,w,h,type});
+  const pagePic=async(name)=>{const u=await mqFetchBytes(MQ_DIR+name+'.jpg'),[w,h]=await mqImgDims(URL.createObjectURL(new Blob([u],{type:'image/jpeg'})));
+    const land=w>h,W=land?900:Math.round(620*w/h),H=Math.round(W*h/w);pic(R,land?0:4,{u8:u},W,H,'jpeg');const nr=Math.ceil(H/20)+1;for(let i=0;i<nr;i++)heights[R+i]=15;R+=nr;breaks.push(R);};
+  const quotePage=v=>{
+    const r0=R;heights[R]=48;put(R,0,T.title+(q.kind==='ordine'?' · ORDINE':''),1);mg(R,0,R,10);
+    {let h=52,w=Math.round(h*A.logo.w/A.logo.h);if(w>230){w=230;h=Math.round(w*A.logo.h/A.logo.w)}pic(R,11,A.logo,w,h,'png')}
+    if(A.client){const h=48,w=Math.min(170,Math.round(h*A.client.w/A.client.h));pic(R,14,A.client,w,Math.round(w*A.client.h/A.client.w),'png')}
+    R+=1;
+    const info=[['Azienda',hv.az,'Telefono',hv.phone,'Data',hv.date],['Indirizzo',hv.addr,'e-mail',hv.email,'Richiesta',hv.rich+' n. '+q.number],['P.Iva',hv.vat,'Persona di contatto',hv.contact,'Rif. Cantiere',hv.cant]];
+    for(const L of info){heights[R]=20;put(R,0,L[0],2);put(R,1,'',2);mg(R,0,R,1);put(R,2,L[1],3);[3,4,5].forEach(c=>put(R,c,'',3));mg(R,2,R,5);put(R,6,L[2],2);put(R,7,'',2);mg(R,6,R,7);put(R,8,L[3],3);[9,10,11].forEach(c=>put(R,c,'',3));mg(R,8,R,11);put(R,12,L[4],2);put(R,13,L[5],3);[14,15].forEach(c=>put(R,c,'',3));mg(R,13,R,15);R+=1}R++;
+    const H=['','tipologia di apertura (A-B-C)','LF= luce foro','LP= luce passaggio','T= dimensione telaio','H= altezza del foro','peso totale ante kg','P= profondità utile','Z= bandella zancata','Y= persiana con lamelle','S= spessore anta','modello','codice','quantità','Prezzo Unitario','TOTALE'];
+    heights[R]=40;H.forEach((h,c)=>put(R,c,h,4));R++;const first=R;let n=0;
+    for(const r of q.rows||[]){heights[R]=r.t==='d'?24:(mqModelTxt(r).length>12?26:18);const p=mqPrice(q,r,v);
+      if(r.t==='d'){put(R,0,'',5);put(R,1,r.desc||'',11);for(let c=2;c<=11;c++)put(R,c,'',11);mg(R,1,R,11)}
+      else{n++;put(R,0,n,5);[r.tip,r.lf,r.lp,r.tt,r.hh,r.peso,r.p,r.z,r.y,r.s].forEach((x,i)=>put(R,i+1,x===''||x==null?'':(isFinite(+String(x).replace(',','.'))&&String(x).trim()!==''&&i>0?+String(x).replace(',','.'):x),5));put(R,11,mqModelTxt(r),5)}
+      put(R,12,r.code||'',5);put(R,13,num(r.qty),5);put(R,14,p,6);put(R,15,null,6,`N${R+1}*O${R+1}`);R++}
+    for(let k=(q.rows||[]).length;k<4;k++){heights[R]=18;for(let c=0;c<=15;c++)put(R,c,'',c>=14?6:5);R++}
+    const last=R-1;R++;
+    put(R,1,q.noteA||'',9);mg(R,1,R,15);R++;put(R,1,q.noteB||'',9);mg(R,1,R,15);R+=1;
+    const cr=R;const cw=440;pic(R,1,A.colori,cw,Math.round(cw*A.colori.h/A.colori.w),'png');
+    put(R,11,mqTraspTxt(q),8);mg(R,11,R,15);R+=2;put(R,11,'TOTALE:',9);mg(R,11,R,13);put(R,14,null,7,`SUM(P${first+1}:P${last+1})`);mg(R,14,R,15);R+=2;
+    put(R,11,q.priceMode==='netto'?'PREZZI NETTI ESCLUSA IVA':'PREZZI DI LISTINO ESCLUSA IVA',9);mg(R,11,R,15);
+    R=Math.max(R+1,cr+Math.ceil(cw*A.colori.h/A.colori.w/20)+1);
+    put(R,1,mqVLabel(v),9);mg(R,1,R,15);R+=1;
+    {const n=mqSN(q),base='NOTE: '+[q.noteC,q.color?'Colore scelto dal cliente: '+q.color:'',q.notes].filter(Boolean).join('\n');heights[R]=Math.max(42,30+(n.text?n.size*1.4:0));put(R,0,{rich:[{t:base,b:1,sz:10,color:'A40000',font:'Arial'},...(n.text?[{t:'\n'+n.text,b:1,sz:n.size,color:n.color.replace('#','').toUpperCase(),font:n.font}]:[])]},10)}for(let c=1;c<=15;c++)put(R,c,'',10);mg(R,0,R,15);R+=1;
+    breaks.push(R);
+  };
+  for(const k of MQ_PAGES(q)){if(k[0]==='Q'&&k.length===2)quotePage(+k[1]);else await pagePic(k)}
+  /* foglio */
+  const cellXml=(r,c,x)=>{const ref=colL(c)+(r+1);
+    if(x.f){const m=/^N(\d+)\*O(\d+)$/.exec(x.f);let val='';if(m){const a=rows[+m[1]-1]||{},b=a[13],d=a[14];val=num(b&&b.v)*num(d&&d.v)}else{const m3=/^O(\d+)\+O(\d+)$/.exec(x.f);if(m3){const g=k=>{const c=(rows[k-1]||{})[14];if(!c)return 0;if(c.f){const mm=/^SUM\(P(\d+):P(\d+)\)$/.exec(c.f);let t=0;if(mm)for(let i=+mm[1]-1;i<=+mm[2]-1;i++){const a=rows[i]||{};if(a[13]&&a[14])t+=num(a[13].v)*num(a[14].v)}return t}return num(c.v)};val=r2(g(+m3[1])+g(+m3[2]))}const m2=/^SUM\(P(\d+):P(\d+)\)$/.exec(x.f);if(m2){let s=0;for(let i=+m2[1]-1;i<=+m2[2]-1;i++){const a=rows[i]||{};if(a[13]&&a[14])s+=num(a[13].v)*num(a[14].v)}val=r2(s)}}
+      return `<c r="${ref}" s="${x.s}"><f>${xe(x.f)}</f><v>${val}</v></c>`}
+    if(x.v&&x.v.rich)return `<c r="${ref}" s="${x.s}" t="inlineStr"><is>${x.v.rich.map(p=>`<r><rPr>${p.b?'<b/>':''}<sz val="${p.sz}"/><color rgb="FF${p.color}"/><rFont val="${xe(p.font)}"/></rPr><t xml:space="preserve">${xe(p.t)}</t></r>`).join('')}</is></c>`;
+    if(x.v===''||x.v==null)return `<c r="${ref}" s="${x.s}"/>`;
+    if(typeof x.v==='number'&&isFinite(x.v))return `<c r="${ref}" s="${x.s}"><v>${x.v}</v></c>`;
+    return `<c r="${ref}" s="${x.s}" t="inlineStr"><is><t xml:space="preserve">${xe(x.v)}</t></is></c>`};
+  const maxR=Math.max(R,...Object.keys(rows).map(Number));let sd='';
+  for(let r=0;r<=maxR;r++){const cs=rows[r],h=heights[r];if(!cs&&!h)continue;sd+=`<row r="${r+1}"${h?` ht="${h}" customHeight="1"`:''}>`+(cs?Object.keys(cs).map(Number).sort((a,b)=>a-b).map(c=>cellXml(r,c,cs[c])).join(''):'')+'</row>'}
+  const widths=[4.7,11.3,8.3,8.3,8.3,8.3,8.3,9.3,8.3,8.3,8.3,12,10.5,8.5,11,11.5];
+  const sheet=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><sheetViews><sheetView workbookViewId="0" zoomScale="90"/></sheetViews><sheetFormatPr defaultRowHeight="15"/><cols>${widths.map((w,i)=>`<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`).join('')}</cols><sheetData>${sd}</sheetData>${merges.length?`<mergeCells count="${merges.length}">${merges.map(m=>`<mergeCell ref="${m}"/>`).join('')}</mergeCells>`:''}<pageMargins left="0.4" right="0.4" top="0.4" bottom="0.4" header="0.2" footer="0.2"/><pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="0"/>${breaks.length?`<rowBreaks count="${breaks.length}" manualBreakCount="${breaks.length}">${breaks.map(b=>`<brk id="${b}" max="16383" man="1"/>`).join('')}</rowBreaks>`:''}<drawing r:id="rId1"/></worksheet>`;
+  const E=9525;let dr='',rel='';const media=[];
+  imgs.forEach((im,i)=>{const ext=im.type==='jpeg'?'jpeg':'png',nm=`image${i+1}.${ext}`;media.push({name:'xl/media/'+nm,data:im.img.u8});rel+=`<Relationship Id="rId${i+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/${nm}"/>`;
+    dr+=`<xdr:oneCellAnchor><xdr:from><xdr:col>${im.c}</xdr:col><xdr:colOff>38100</xdr:colOff><xdr:row>${im.r}</xdr:row><xdr:rowOff>19050</xdr:rowOff></xdr:from><xdr:ext cx="${Math.round(im.w*E)}" cy="${Math.round(im.h*E)}"/><xdr:pic><xdr:nvPicPr><xdr:cNvPr id="${i+2}" name="Immagine ${i+1}"/><xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr><xdr:blipFill><a:blip r:embed="rId${i+1}"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${Math.round(im.w*E)}" cy="${Math.round(im.h*E)}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic><xdr:clientData/></xdr:oneCellAnchor>`});
+  const files=[
+    {name:'[Content_Types].xml',data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Default Extension="jpeg" ContentType="image/jpeg"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/></Types>`},
+    {name:'_rels/.rels',data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`},
+    {name:'xl/workbook.xml',data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${q.kind==='ordine'?'Ordine':'Preventivo'}" sheetId="1" r:id="rId1"/></sheets></workbook>`},
+    {name:'xl/_rels/workbook.xml.rels',data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`},
+    {name:'xl/styles.xml',data:MQ_STYLES},
+    {name:'xl/worksheets/sheet1.xml',data:sheet},
+    {name:'xl/worksheets/_rels/sheet1.xml.rels',data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/></Relationships>`},
+    {name:'xl/drawings/drawing1.xml',data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">${dr}</xdr:wsDr>`},
+    {name:'xl/drawings/_rels/drawing1.xml.rels',data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rel}</Relationships>`},
+    ...media];
+  return new File([mqZip(files)],mqFileName(q)+'.xlsx',{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+}
+
+/* ---------- invio ---------- */
+function mqMsg(q){const cl=mqClient(q),me=ME()||{};return `Buongiorno${q.h.contact?' '+q.h.contact:''},\nin allegato ${q.kind==='ordine'?"l'ordine":'il preventivo'} n. ${q.number} per l'automazione delle ante a battente Antamatic${q.h.cantiere?' (rif. '+q.h.cantiere+')':''}.\nResto a disposizione per qualsiasi chiarimento.\nCordiali saluti\n${me.name||''}`}
+function mqPhone(q){const cl=mqClient(q)||{},c=(cl.contacts||[]).find(x=>x.name&&x.name===q.h.contact)||{};let p=String(c.mobile||q.h.phone||cl.phone||'').replace(/\D/g,'');if(p&&!p.startsWith('39')&&p.length<=10)p='39'+p;return p}
+function mqOutModal(){
+  const q=MQ();
+  $('#modal').innerHTML=`<div class="scrim" data-act="closeModal"></div><div class="sheet"><header><h3>${q.kind==='ordine'?'Ordine':'Preventivo'} ${esc(q.number)} · stampa e invio</h3><button class="x" data-act="closeModal" aria-label="Chiudi">×</button></header>
+  <p class="muted">Il PDF contiene ${q.kind==='ordine'?"la pagina dell'ordine e le 2 pagine «Rilievo quote»":'la versione senza radio, le 2 pagine «Rilievo quote», la versione predisposto radio e le pagine dei radiocomandi'}. Le foto degli accessori non vengono inserite.</p>
+  <div class="acts" style="flex-wrap:wrap"><button class="btn pri" data-act="mqGo" data-w="pdf">⬇ Scarica PDF</button><button class="btn" data-act="mqGo" data-w="xlsx">⬇ Scarica Excel</button></div>
+  <h5>Invia</h5><div class="acts" style="flex-wrap:wrap"><button class="btn pri" data-act="mqGo" data-w="share">📎 Invia PDF (WhatsApp, mail…)</button><button class="btn" data-act="mqGo" data-w="shareX">📎 Invia Excel</button><button class="btn" data-act="mqGo" data-w="wa">WhatsApp</button><button class="btn" data-act="mqGo" data-w="mail">Email</button></div>
+  <p class="muted" id="mqOutMsg">Dal telefono o dal tablet «Invia» apre WhatsApp, la mail o le altre app con il file già allegato. Dal computer il file viene scaricato e si apre WhatsApp o la mail: allega il file appena scaricato.</p>
+  <footer><button class="btn ghost" data-act="closeModal">Chiudi</button></footer></div>`;
+}
+ACT.mqGo=async d=>{const q=MQ(),m=$('#mqOutMsg'),w=d.w;
+  const say=t=>{if(m)m.textContent=t};
+  try{say('Preparo il file…');
+    const f=(w==='xlsx'||w==='shareX')?await mqXlsxFile(q):await mqPdfFile(q);
+    if(w==='share'||w==='shareX'){try{if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f],title:f.name,text:mqMsg(q)});say('Inviato.');return}}catch(e){if(e&&e.name==='AbortError'){say('');return}}}
+    await DL.save({filename:f.name,data:f});
+    if(w==='wa'||w==='share'||w==='shareX'){const p=mqPhone(q);window.open((p?'https://wa.me/'+p:'https://wa.me/')+'?text='+encodeURIComponent(mqMsg(q)),'_blank');say('File scaricato: allegalo nella chat di WhatsApp ('+f.name+').')}
+    else if(w==='mail'){const cl=mqClient(q)||{},c=(cl.contacts||[]).find(x=>x.name===q.h.contact)||{};location.href='mailto:'+encodeURIComponent(c.email||q.h.email||'')+'?subject='+encodeURIComponent((q.kind==='ordine'?'Ordine ':'Preventivo ')+q.number+' – Antamatic ante a battente')+'&body='+encodeURIComponent(mqMsg(q));say('File scaricato: allegalo alla mail ('+f.name+').')}
+    else say('Scaricato: '+f.name);
+  }catch(e){console.error(e);say('Non riesco a creare il file: '+(e.message||e))}
+};
+
 /* ---------- più numeri di telefono per clienti e aziende ---------- */
 const PHONES_F={k:'phones',label:'Altri numeri di telefono (uno per riga, es. Magazzino: 0721 123456)',type:'textarea',rows:3,full:true};
 [CLIENT_F,COMPANY_F].forEach(F=>{if(F.some(f=>f.k==='phones'))return;const i=F.findIndex(f=>f.k==='phone');F.splice(i<0?F.length:i+1,0,PHONES_F)});
@@ -4620,7 +5062,7 @@ const _renderOD=render;
 document.head.insertAdjacentHTML('beforeend','<style>.row.inactive{border-left:4px solid var(--bad);background:var(--bad-soft)}.row.inactive b{color:var(--bad)}.dhead.inactive h2{color:var(--bad)}</style>');
 render=function(){
   _renderOD();
-  markTodo();compDecorate();collDecorate();utilDecorate();sedeDecorate();mapDecorate();
+  markTodo();compDecorate();collDecorate();utilDecorate();sedeDecorate();mapDecorate();mqDecorate();
   if(ui.view==='aziende'){const sp=document.querySelector('#app .split.h');if(sp)sp.classList.remove('h')}
   navOrder();
   document.querySelectorAll('#app .pill.bad').forEach(p=>{if(p.textContent.trim()!=='Inattivo')return;const r=p.closest('.row')||p.closest('.dhead');if(r)r.classList.add('inactive')});
@@ -4640,7 +5082,7 @@ function odGate(kind,extra){
 Object.assign(ACT,{
   odMenu:()=>{
     $('#modal').innerHTML=`<div class="scrim" data-act="closeModal"></div><div class="sheet"><header><h3>OneDrive e backup</h3><button class="x" data-act="closeModal" aria-label="Chiudi">×</button></header>
-    <p class="muted" style="margin:0">Versione app: 27/11/2026 · 12</p><p>I dati sono nella cartella <b>${esc(OD_CFG.folder)}</b> del tuo OneDrive${OD.user?' ('+esc(OD.user)+')':''}. Ogni giorno, alla prima apertura, l'app salva da sola un backup nella sottocartella <b>backup</b> (restano gli ultimi 40).</p>
+    <p class="muted" style="margin:0">Versione app: 28/11/2026 · 15</p><p>I dati sono nella cartella <b>${esc(OD_CFG.folder)}</b> del tuo OneDrive${OD.user?' ('+esc(OD.user)+')':''}. Ogni giorno, alla prima apertura, l'app salva da sola un backup nella sottocartella <b>backup</b> (restano gli ultimi 40).</p>
     <div class="acts" style="flex-wrap:wrap"><button class="btn pri" data-act="odBackupNow">Fai un backup adesso</button><button class="btn" data-act="odBackupDl">Scarica backup sul dispositivo</button><button class="btn" data-act="odSyncNow">Aggiorna dagli altri dispositivi</button></div>
     ${OD.detail?`<p style="color:var(--bad)"><b>Ultimo errore:</b> <span class="mono">${esc(OD.detail)}</span></p>`:''}<h5>Aggiungi dati o ripristina un backup</h5><p class="muted">Carica un file preparato da Claude (es. clienti di un'azienda: si <b>aggiungono</b> ai tuoi dati) oppure un file di backup (<b>sostituisce</b> i dati attuali). In entrambi i casi prima viene fatto un backup automatico.</p>
     <input type="file" accept=".json,application/json" id="odImp"><p id="odImpMsg" class="muted"></p>
